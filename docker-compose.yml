@@ -1,0 +1,21 @@
+services:
+  autodeletarr:
+    build: .
+    container_name: autodeletarr
+    environment:
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=PUT_YOUR_KEY_HERE
+      - TAG_LABEL=autodelete30
+      - DAYS_OLD=30
+
+      # Safety first: set true to test, then false to actually delete
+      - DRY_RUN=true
+
+      # What deletion does
+      - DELETE_FILES=true
+      - ADD_IMPORT_EXCLUSION=false
+
+      # Cron: minute hour day month weekday (default 03:15 daily)
+      - CRON_SCHEDULE=15 3 * * *
+      - RUN_ON_STARTUP=false
+    restart: unless-stopped
