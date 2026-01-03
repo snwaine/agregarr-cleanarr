@@ -60,6 +60,45 @@ def parse_radarr_date(s: str) -> datetime:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
+def get_tag_id_by_label(tag_label: str) -> int | None:
+    tags = radarr_get("/api/v3/tag")
+    tag = next((t for t in tags if t.get("label") == tag_label), None)
+    return tag["id"] if tag else None
+
+def find_delete_candidates(tag_label: str, days_old: int):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_old)
+
+    tag_id = get_tag_id_by_label(tag_label)
+    if not tag_id:
+        return {"error": f"Tag '{tag_label}' not found", "candidates": []}
+
+    movies = radarr_get("/api/v3/movie")
+    candidates = []
+
+    for m in movies:
+        if tag_id not in (m.get("tags") or []):
+            continue
+
+        added_str = m.get("added")
+        if not added_str:
+            continue
+
+        added = parse_radarr_date(added_str)
+        if added < cutoff:
+            age_days = int((datetime.now(timezone.utc) - added).total_seconds() // 86400)
+            candidates.append({
+                "id": m.get("id"),
+                "title": m.get("title"),
+                "year": m.get("year"),
+                "added": added_str,
+                "age_days": age_days,
+                "path": m.get("path"),
+            })
+
+    # Sort oldest first
+    candidates.sort(key=lambda x: x["age_days"], reverse=True)
+    return {"error": None, "candidates": candidates, "tag_id": tag_id, "cutoff": cutoff.isoformat()}
+
 def main():
     if not RADARR_URL:
         die("RADARR_URL is required, e.g. http://radarr:7878")
