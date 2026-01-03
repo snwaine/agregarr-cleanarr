@@ -1,21 +1,23 @@
 #!/bin/sh
 set -eu
 
-: "${CRON_SCHEDULE:=15 3 * * *}"
 : "${WEBUI_PORT:=7575}"
 : "${CONFIG_DIR:=/config}"
+: "${CRON_SCHEDULE:=15 3 * * *}"
+: "${LOG_PATH:=/var/log/agregarr-cleanarr.log}"
 
 mkdir -p "$CONFIG_DIR"
-touch /var/log/agregarr-cleanarr.log
+touch "$LOG_PATH"
 
-# Cron uses env CRON_SCHEDULE; note: actual schedule can be edited in WebUI too,
-# but cron won't pick it up until container restart unless we implement dynamic reload.
-echo "${CRON_SCHEDULE} python /app/app.py >> /var/log/agregarr-cleanarr.log 2>&1" > /etc/crontabs/root
+# Write initial cron file
+echo "${CRON_SCHEDULE} python /app/app.py >> ${LOG_PATH} 2>&1" > /etc/crontabs/root
 
-# Start WebUI
-echo "[agregarr-cleanarr] Starting WebUI on :${WEBUI_PORT}"
+echo "[agregarr-cleanarr] WebUI on :${WEBUI_PORT}"
+echo "[agregarr-cleanarr] Cron schedule: ${CRON_SCHEDULE}"
+echo "[agregarr-cleanarr] Log: ${LOG_PATH}"
+
+# Start WebUI in background
 python /app/webui.py --host 0.0.0.0 --port "${WEBUI_PORT}" >/dev/null 2>&1 &
-WEBUI_PID=$!
 
 # Optional run on startup
 if [ "${RUN_ON_STARTUP:-false}" = "true" ]; then
@@ -35,6 +37,6 @@ fi
   done
 ) &
 
-# Start cron in foreground
+# Start cron in foreground (PID 1) so SIGHUP reload works
 echo "[agregarr-cleanarr] Starting cron"
 exec crond -f -l 2
