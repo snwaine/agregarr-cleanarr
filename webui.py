@@ -98,11 +98,9 @@ def preview_candidates(cfg):
     for m in movies:
         if tag_id not in (m.get("tags") or []):
             continue
-
         added_str = m.get("added")
         if not added_str:
             continue
-
         added = parse_radarr_date(added_str).astimezone(timezone.utc)
         if added < cutoff:
             age_days = int((now - added).total_seconds() // 86400)
@@ -153,308 +151,409 @@ def time_ago(dt_str: str) -> str:
     return f"{days}d ago"
 
 # --------------------------
-# Templates
+# Dark Theme Base
 # --------------------------
-PAGE = """
+BASE_HEAD = """
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#0b0f14;
+    --panel:#0f1620;
+    --panel2:#0c121b;
+    --muted:#9aa7b2;
+    --text:#e6edf3;
+    --line:#1f2a36;
+    --line2:#283241;
+    --accent:#7c3aed;    /* purple */
+    --accent2:#22c55e;   /* green */
+    --warn:#f59e0b;      /* amber */
+    --bad:#ef4444;       /* red */
+    --shadow: 0 12px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body{
+    margin:0;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    background: radial-gradient(1200px 700px at 20% 0%, rgba(124,58,237,.18), transparent 60%),
+                radial-gradient(900px 600px at 100% 10%, rgba(34,197,94,.12), transparent 55%),
+                var(--bg);
+    color: var(--text);
+  }
+
+  a{ color: var(--text); text-decoration: none; }
+  a:hover{ text-decoration: underline; }
+
+  .wrap{ max-width: 1200px; margin: 0 auto; padding: 22px 18px 36px; }
+
+  .topbar{
+    display:flex; align-items:center; justify-content: space-between;
+    gap:12px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+    box-shadow: var(--shadow);
+    position: sticky;
+    top: 14px;
+    z-index: 20;
+    backdrop-filter: blur(10px);
+  }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .logo{
+    width: 38px; height: 38px; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(124,58,237,.9), rgba(34,197,94,.6));
+    box-shadow: 0 10px 24px rgba(124,58,237,.18);
+  }
+  .title h1{ margin:0; font-size: 16px; letter-spacing:.2px; }
+  .title .sub{ color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  .nav{
+    display:flex; align-items:center; gap:8px; flex-wrap: wrap; justify-content: flex-end;
+  }
+  .pill{
+    border: 1px solid var(--line2);
+    background: rgba(255,255,255,.03);
+    padding: 8px 11px;
+    border-radius: 999px;
+    font-size: 13px;
+  }
+  .pill.active{
+    border-color: rgba(124,58,237,.65);
+    box-shadow: 0 0 0 3px rgba(124,58,237,.18);
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 14px;
+    margin-top: 16px;
+  }
+
+  .card{
+    grid-column: span 12;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+    box-shadow: var(--shadow);
+    overflow:hidden;
+  }
+  .card .hd{
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    display:flex; align-items:center; justify-content: space-between;
+    gap:12px;
+    background: rgba(0,0,0,.12);
+  }
+  .card .hd h2{ margin:0; font-size: 14px; letter-spacing:.2px; }
+  .card .bd{ padding: 14px 16px; }
+
+  .kpi{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 12px;
+  }
+  .k{
+    grid-column: span 12;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(0,0,0,.18);
+    padding: 12px 12px;
+  }
+  .k .l{ color: var(--muted); font-size: 12px; }
+  .k .v{ margin-top: 6px; font-size: 18px; font-weight: 700; }
+
+  @media(min-width: 900px){
+    .k { grid-column: span 4; }
+    .half { grid-column: span 6; }
+  }
+
+  .muted{ color: var(--muted); }
+  code{
+    background: rgba(255,255,255,.06);
+    border: 1px solid var(--line2);
+    padding: 2px 7px;
+    border-radius: 10px;
+    color: #dbeafe;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+    font-size: 12px;
+  }
+
+  .btnrow{ display:flex; gap:10px; flex-wrap: wrap; }
+  .btn{
+    border: 1px solid var(--line2);
+    background: rgba(255,255,255,.03);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 12px;
+    cursor:pointer;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .btn:hover{ border-color: rgba(124,58,237,.55); }
+  .btn.primary{
+    border-color: rgba(124,58,237,.55);
+    background: linear-gradient(135deg, rgba(124,58,237,.28), rgba(124,58,237,.10));
+  }
+  .btn.good{
+    border-color: rgba(34,197,94,.55);
+    background: linear-gradient(135deg, rgba(34,197,94,.22), rgba(34,197,94,.08));
+  }
+  .btn.warn{
+    border-color: rgba(245,158,11,.55);
+    background: linear-gradient(135deg, rgba(245,158,11,.22), rgba(245,158,11,.08));
+  }
+  .btn.bad{
+    border-color: rgba(239,68,68,.55);
+    background: linear-gradient(135deg, rgba(239,68,68,.20), rgba(239,68,68,.08));
+  }
+
+  .alert{
+    border-radius: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--line2);
+    background: rgba(255,255,255,.03);
+    margin: 14px 0 0;
+  }
+  .alert.success{ border-color: rgba(34,197,94,.55); }
+  .alert.error{ border-color: rgba(239,68,68,.55); }
+
+  .form{
+    display:grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  @media(min-width: 900px){
+    .form{ grid-template-columns: 1fr 1fr; }
+  }
+  .field{
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: rgba(0,0,0,.18);
+  }
+  .field label{ display:block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .field input[type=text], .field input[type=password], .field input[type=number]{
+    width: 100%;
+    border: 1px solid var(--line2);
+    background: rgba(255,255,255,.04);
+    color: var(--text);
+    padding: 10px 10px;
+    border-radius: 12px;
+    outline: none;
+  }
+  .field input:focus{
+    border-color: rgba(124,58,237,.65);
+    box-shadow: 0 0 0 3px rgba(124,58,237,.15);
+  }
+
+  .checks{
+    display:flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .check{
+    display:flex; align-items:center; gap:10px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: rgba(0,0,0,.18);
+  }
+  .check input{ transform: scale(1.2); }
+
+  table{
+    width:100%;
+    border-collapse: collapse;
+    overflow:hidden;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+  }
+  th, td{
+    padding: 10px 10px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    vertical-align: top;
+  }
+  th{
+    text-align:left;
+    color:#cbd5e1;
+    background: rgba(255,255,255,.04);
+    position: sticky;
+    top: 0;
+  }
+  tr:hover td{ background: rgba(255,255,255,.02); }
+  .tablewrap{ max-height: 420px; overflow:auto; border-radius: 14px; border: 1px solid var(--line); }
+
+  .statusDot{
+    display:inline-flex; align-items:center; gap:8px;
+    font-weight: 700;
+  }
+  .dot{
+    width:10px; height:10px; border-radius: 999px;
+    background: var(--muted);
+    box-shadow: 0 0 0 4px rgba(255,255,255,.05);
+  }
+  .dot.ok{ background: var(--accent2); box-shadow: 0 0 0 4px rgba(34,197,94,.12); }
+  .dot.warn{ background: var(--warn); box-shadow: 0 0 0 4px rgba(245,158,11,.12); }
+  .dot.bad{ background: var(--bad); box-shadow: 0 0 0 4px rgba(239,68,68,.12); }
+</style>
+"""
+
+def shell(page_title: str, active: str, body: str):
+    # active: 'dash' | 'settings' | 'preview' | 'status'
+    def pill(name, href, key):
+        cls = "pill active" if active == key else "pill"
+        return f'<a class="{cls}" href="{href}">{name}</a>'
+
+    nav = (
+        pill("Dashboard", "/dashboard", "dash")
+        + pill("Settings", "/settings", "settings")
+        + pill("Preview", "/preview", "preview")
+        + pill("Status", "/status", "status")
+    )
+
+    return f"""
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>agregarr-cleanarr</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; max-width: 900px; }
-    .row { display: flex; gap: 12px; margin-bottom: 12px; }
-    label { width: 220px; font-weight: bold; }
-    input[type=text], input[type=password], input[type=number] { flex: 1; padding: 8px; }
-    .chk { display:flex; align-items:center; gap:10px; margin-bottom: 10px; }
-    .btns { display:flex; gap:10px; margin-top: 18px; flex-wrap: wrap; }
-    button { padding: 10px 14px; cursor: pointer; }
-    .note { color: #444; margin-top: 12px; }
-    code { background: #f3f3f3; padding: 2px 6px; }
-
-    .alert { padding: 12px 14px; margin-bottom: 14px; border-radius: 4px; font-weight: bold; }
-    .alert-success { background: #e6f4ea; color: #1e7e34; border: 1px solid #c3e6cb; }
-    .alert-error { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
-  </style>
+  <title>{page_title}</title>
+  {BASE_HEAD}
 </head>
 <body>
-  <h2>agregarr-cleanarr settings</h2>
-
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <div class="alert alert-{{category}}">
-        {{message}}
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo"></div>
+        <div class="title">
+          <h1>agregarr-cleanarr</h1>
+          <div class="sub">Radarr tag + age cleanup • WebUI • cron apply • dashboard</div>
+        </div>
       </div>
-    {% endfor %}
-  {% endwith %}
-
-  <form method="post" action="/save">
-    <div class="row"><label>Radarr URL</label><input type="text" name="RADARR_URL" value="{{cfg.RADARR_URL}}"></div>
-    <div class="row"><label>Radarr API Key</label><input type="password" name="RADARR_API_KEY" value="{{cfg.RADARR_API_KEY}}"></div>
-
-    <div class="row"><label>Tag Label</label><input type="text" name="TAG_LABEL" value="{{cfg.TAG_LABEL}}"></div>
-    <div class="row"><label>Days Old</label><input type="number" name="DAYS_OLD" value="{{cfg.DAYS_OLD}}" min="1"></div>
-
-    <div class="chk"><input type="checkbox" name="DRY_RUN" {% if cfg.DRY_RUN %}checked{% endif %}> <span>Dry Run (don’t delete, just log)</span></div>
-    <div class="chk"><input type="checkbox" name="DELETE_FILES" {% if cfg.DELETE_FILES %}checked{% endif %}> <span>Delete Files</span></div>
-    <div class="chk"><input type="checkbox" name="ADD_IMPORT_EXCLUSION" {% if cfg.ADD_IMPORT_EXCLUSION %}checked{% endif %}> <span>Add Import Exclusion</span></div>
-
-    <div class="row"><label>Cron Schedule</label><input type="text" name="CRON_SCHEDULE" value="{{cfg.CRON_SCHEDULE}}"></div>
-    <p class="note">After changing the schedule, click <b>Apply Cron</b> to activate it immediately.</p>
-
-    <div class="chk"><input type="checkbox" name="RUN_ON_STARTUP" {% if cfg.RUN_ON_STARTUP %}checked{% endif %}> <span>Run once when container starts</span></div>
-
-    <div class="row"><label>HTTP Timeout Seconds</label><input type="number" name="HTTP_TIMEOUT_SECONDS" value="{{cfg.HTTP_TIMEOUT_SECONDS}}" min="5"></div>
-
-    <div class="btns">
-      <button type="submit">Save</button>
-      <button type="submit" formaction="/run-now" formmethod="post">Run Now</button>
-      <button type="submit" formaction="/apply-cron" formmethod="post">Apply Cron</button>
+      <div class="nav">{nav}</div>
     </div>
 
-    <p class="note">
-      Settings are saved to <code>/config/config.json</code>. Dashboard state in <code>/config/state.json</code>.
-    </p>
-  </form>
-
-  <p>
-    <a href="/dashboard">Dashboard</a> |
-    <a href="/preview">Preview delete candidates</a> |
-    <a href="/status">Status</a>
-  </p>
+    {body}
+  </div>
 </body>
 </html>
 """
 
-PREVIEW_PAGE = """
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>agregarr-cleanarr - Preview</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; max-width: 1100px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
-    th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
-    th { background: #f3f3f3; text-align: left; }
-    .err { color: #b00020; margin-top: 10px; }
-    .top { display:flex; justify-content: space-between; align-items:center; }
-    a { text-decoration: none; }
-    .muted { color:#555; }
-    code { background: #f3f3f3; padding: 2px 6px; }
-  </style>
-</head>
-<body>
-  <div class="top">
-    <h2>Preview delete candidates</h2>
-    <div><a href="/">← Back to Settings</a></div>
-  </div>
-
-  <div class="muted">
-    Tag: <b>{{tag}}</b> | Days old: <b>{{days}}</b> | Cutoff: <code>{{cutoff}}</code>
-  </div>
-
-  {% if error %}
-    <div class="err">{{error}}</div>
-  {% else %}
-    <p>Found <b>{{count}}</b> candidate(s). (Preview only — nothing is deleted here.)</p>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Age (days)</th>
-          <th>Title</th>
-          <th>Year</th>
-          <th>Added</th>
-          <th>ID</th>
-          <th>Path</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in candidates %}
-          <tr>
-            <td>{{c.age_days}}</td>
-            <td>{{c.title}}</td>
-            <td>{{c.year}}</td>
-            <td>{{c.added}}</td>
-            <td>{{c.id}}</td>
-            <td>{{c.path}}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endif %}
-</body>
-</html>
-"""
-
-DASHBOARD_PAGE = """
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>agregarr-cleanarr - Dashboard</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 24px; max-width: 1100px; }
-    .top { display:flex; justify-content: space-between; align-items:center; }
-    .cards { display:flex; gap:12px; margin-top: 14px; flex-wrap: wrap; }
-    .card { border:1px solid #ddd; border-radius:6px; padding:12px 14px; min-width: 240px; }
-    h3 { margin: 0 0 8px 0; }
-    table { border-collapse: collapse; width: 100%; margin-top: 14px; }
-    th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
-    th { background: #f3f3f3; text-align: left; }
-    .muted { color:#555; }
-    .ok { font-weight:bold; color:#1e7e34; }
-    .warn { font-weight:bold; color:#8a6d3b; }
-    .bad { font-weight:bold; color:#842029; }
-    code { background: #f3f3f3; padding: 2px 6px; }
-    .btn { padding: 8px 12px; border: 1px solid #ccc; border-radius: 5px; background: #fff; cursor: pointer; }
-    .alert { padding: 12px 14px; margin: 12px 0; border-radius: 4px; font-weight: bold; }
-    .alert-success { background: #e6f4ea; color: #1e7e34; border: 1px solid #c3e6cb; }
-    .alert-error { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
-  </style>
-</head>
-<body>
-  <div class="top">
-    <h2>agregarr-cleanarr dashboard</h2>
-    <div>
-      <a href="/">Settings</a> |
-      <a href="/preview">Preview</a> |
-      <a href="/status">Status</a>
-    </div>
-  </div>
-
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for category, message in messages %}
-      <div class="alert alert-{{category}}">
-        {{message}}
-      </div>
-    {% endfor %}
-  {% endwith %}
-
-  <form method="post" action="/clear-state" onsubmit="return confirm('Clear dashboard history/state?');">
-    <button class="btn" type="submit">Clear state</button>
-  </form>
-
-  {% if not last_run %}
-    <p class="muted">No runs recorded yet. Click <b>Run Now</b> from Settings.</p>
-  {% else %}
-    <div class="cards">
-      <div class="card">
-        <h3>Last run</h3>
-        <div>Status: <span class="{{status_class}}">{{last_run.status}}</span></div>
-        <div>Finished: <code>{{last_run.finished_at}}</code></div>
-        <div class="muted">({{finished_ago}})</div>
-        <div>Duration: <b>{{last_run.duration_seconds}}</b> sec</div>
-      </div>
-
-      <div class="card">
-        <h3>Rule</h3>
-        <div>Tag: <b>{{last_run.tag_label}}</b></div>
-        <div>Older than: <b>{{last_run.days_old}}</b> days</div>
-        <div>Dry run: <b>{{last_run.dry_run}}</b></div>
-        <div>Delete files: <b>{{last_run.delete_files}}</b></div>
-      </div>
-
-      <div class="card">
-        <h3>Results</h3>
-        <div>Candidates: <b>{{last_run.candidates_found}}</b></div>
-        <div>Deleted: <b>{{deleted_count}}</b></div>
-        <div>Errors: <b>{{error_count}}</b></div>
-      </div>
-    </div>
-
-    {% if error_count > 0 %}
-      <div class="card" style="margin-top:12px;">
-        <h3>Last errors</h3>
-        <ul>
-          {% for e in last_run.errors[-5:] %}
-            <li>{{e}}</li>
-          {% endfor %}
-        </ul>
-      </div>
-    {% endif %}
-
-    <h3 style="margin-top:18px;">Last deleted (most recent run)</h3>
-    {% if last_run.deleted and last_run.deleted|length > 0 %}
-      <table>
-        <thead>
-          <tr>
-            <th>Deleted at</th>
-            <th>Age (days)</th>
-            <th>Title</th>
-            <th>Year</th>
-            <th>ID</th>
-            <th>Path</th>
-            <th>Dry-run?</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for d in last_run.deleted[:50] %}
-            <tr>
-              <td>{{d.deleted_at or ""}}</td>
-              <td>{{d.age_days}}</td>
-              <td>{{d.title}}</td>
-              <td>{{d.year}}</td>
-              <td>{{d.id}}</td>
-              <td>{{d.path}}</td>
-              <td>{{d.dry_run}}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <p class="muted">Showing up to 50 entries from the last run.</p>
-    {% else %}
-      <p class="muted">No deletions recorded for the last run.</p>
-    {% endif %}
-
-    <h3 style="margin-top:18px;">Run history (latest {{history_limit}})</h3>
-    {% if history and history|length > 0 %}
-      <table>
-        <thead>
-          <tr>
-            <th>Finished</th>
-            <th>When</th>
-            <th>Status</th>
-            <th>Tag</th>
-            <th>Days</th>
-            <th>Candidates</th>
-            <th>Deleted</th>
-            <th>Dry run</th>
-            <th>Duration (s)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in history %}
-            <tr>
-              <td>{{r.finished_at or ""}}</td>
-              <td>{{ago_map.get(r.finished_at, "")}}</td>
-              <td>{{r.status}}</td>
-              <td>{{r.tag_label}}</td>
-              <td>{{r.days_old}}</td>
-              <td>{{r.candidates_found}}</td>
-              <td>{{ (r.deleted_count if not r.dry_run else (r.deleted|length)) }}</td>
-              <td>{{r.dry_run}}</td>
-              <td>{{r.duration_seconds}}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="muted">No history yet.</p>
-    {% endif %}
-  {% endif %}
-</body>
-</html>
-"""
+# --------------------------
+# Pages
+# --------------------------
+def render_alerts():
+    # Inject flash messages
+    html = ""
+    for category, message in get_flashed_messages(with_categories=True):
+        cls = "success" if category == "success" else "error"
+        html += f'<div class="alert {cls}">{message}</div>'
+    return html
 
 # --------------------------
 # Routes
 # --------------------------
+
+# Default page: dashboard
 @app.get("/")
-def index():
+def home():
+    return redirect("/dashboard")
+
+@app.get("/settings")
+def settings():
     cfg = load_config()
-    return render_template_string(PAGE, cfg=type("C", (), cfg))
+
+    alerts = render_alerts()
+    body = f"""
+      <div class="grid">
+        <div class="card">
+          <div class="hd">
+            <h2>Settings</h2>
+            <div class="btnrow">
+              <form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>
+              <form method="post" action="/apply-cron"><button class="btn warn" type="submit">Apply Cron</button></form>
+            </div>
+          </div>
+          <div class="bd">
+            <div class="muted">Saved to <code>/config/config.json</code>. Cron changes need <b>Apply Cron</b>.</div>
+            {alerts}
+
+            <form method="post" action="/save" style="margin-top:14px;">
+              <div class="form">
+                <div class="field">
+                  <label>Radarr URL</label>
+                  <input type="text" name="RADARR_URL" value="{cfg["RADARR_URL"]}">
+                </div>
+                <div class="field">
+                  <label>Radarr API Key</label>
+                  <input type="password" name="RADARR_API_KEY" value="{cfg["RADARR_API_KEY"]}">
+                </div>
+
+                <div class="field">
+                  <label>Tag Label</label>
+                  <input type="text" name="TAG_LABEL" value="{cfg["TAG_LABEL"]}">
+                </div>
+                <div class="field">
+                  <label>Days Old</label>
+                  <input type="number" min="1" name="DAYS_OLD" value="{cfg["DAYS_OLD"]}">
+                </div>
+
+                <div class="field">
+                  <label>Cron Schedule</label>
+                  <input type="text" name="CRON_SCHEDULE" value="{cfg["CRON_SCHEDULE"]}">
+                </div>
+                <div class="field">
+                  <label>HTTP Timeout Seconds</label>
+                  <input type="number" min="5" name="HTTP_TIMEOUT_SECONDS" value="{cfg["HTTP_TIMEOUT_SECONDS"]}">
+                </div>
+              </div>
+
+              <div class="checks" style="margin-top:12px;">
+                <label class="check">
+                  <input type="checkbox" name="DRY_RUN" {"checked" if cfg["DRY_RUN"] else ""}>
+                  <div>
+                    <div style="font-weight:700;">Dry Run</div>
+                    <div class="muted">Log only; no deletes.</div>
+                  </div>
+                </label>
+
+                <label class="check">
+                  <input type="checkbox" name="DELETE_FILES" {"checked" if cfg["DELETE_FILES"] else ""}>
+                  <div>
+                    <div style="font-weight:700;">Delete Files</div>
+                    <div class="muted">Remove movie files from disk.</div>
+                  </div>
+                </label>
+
+                <label class="check">
+                  <input type="checkbox" name="ADD_IMPORT_EXCLUSION" {"checked" if cfg["ADD_IMPORT_EXCLUSION"] else ""}>
+                  <div>
+                    <div style="font-weight:700;">Add Import Exclusion</div>
+                    <div class="muted">Prevents Radarr re-import.</div>
+                  </div>
+                </label>
+
+                <label class="check">
+                  <input type="checkbox" name="RUN_ON_STARTUP" {"checked" if cfg["RUN_ON_STARTUP"] else ""}>
+                  <div>
+                    <div style="font-weight:700;">Run on startup</div>
+                    <div class="muted">Run once when container starts.</div>
+                  </div>
+                </label>
+              </div>
+
+              <div class="btnrow" style="margin-top:14px;">
+                <button class="btn primary" type="submit">Save Settings</button>
+                <a class="btn" href="/preview" style="display:inline-flex; align-items:center;">Preview Candidates</a>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    """
+
+    return render_template_string(shell("agregarr-cleanarr • Settings", "settings", body))
 
 @app.post("/save")
 def save():
@@ -474,14 +573,14 @@ def save():
 
     save_config(cfg)
     flash("Settings saved ✔", "success")
-    return redirect("/")
+    return redirect("/settings")
 
 @app.post("/run-now")
 def run_now():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     (CONFIG_DIR / "run_now.flag").write_text("1", encoding="utf-8")
-    flash("Run Now triggered ✔ (check dashboard/logs)", "success")
-    return redirect("/")
+    flash("Run Now triggered ✔ (check Dashboard/logs)", "success")
+    return redirect("/dashboard")
 
 @app.post("/apply-cron")
 def apply_cron():
@@ -495,83 +594,336 @@ def apply_cron():
         with open("/etc/crontabs/root", "w", encoding="utf-8") as f:
             f.write(cron_line)
 
-        # BusyBox crond runs as PID 1 (entrypoint execs it)
+        # BusyBox crond is PID 1 (entrypoint execs it)
         os.kill(1, signal.SIGHUP)
-
         flash("Cron schedule applied successfully ✔", "success")
     except Exception as e:
         flash(f"Failed to apply cron: {e}", "error")
 
-    return redirect("/")
+    return redirect("/settings")
 
 @app.get("/preview")
 def preview():
     cfg = load_config()
+    alerts = render_alerts()
+
     try:
         result = preview_candidates(cfg)
-        return render_template_string(
-            PREVIEW_PAGE,
-            tag=cfg.get("TAG_LABEL", ""),
-            days=int(cfg.get("DAYS_OLD", 30)),
-            cutoff=result.get("cutoff", ""),
-            error=result.get("error"),
-            candidates=result.get("candidates", []),
-            count=len(result.get("candidates", [])),
-        )
+        error = result.get("error")
+        candidates = result.get("candidates", [])
+        cutoff = result.get("cutoff", "")
+
+        rows = ""
+        for c in candidates[:500]:
+            rows += f"""
+              <tr>
+                <td>{c["age_days"]}</td>
+                <td>{c.get("title","")}</td>
+                <td>{c.get("year","")}</td>
+                <td><code>{c.get("added","")}</code></td>
+                <td>{c.get("id","")}</td>
+                <td class="muted">{(c.get("path","") or "")}</td>
+              </tr>
+            """
+
+        table = ""
+        if error:
+            table = f'<div class="alert error">{error}</div>'
+        else:
+            table = f"""
+              <div class="muted">Found <b>{len(candidates)}</b> candidate(s). Preview only (no deletes).</div>
+              <div class="muted" style="margin-top:6px;">Cutoff: <code>{cutoff}</code></div>
+              <div class="tablewrap" style="margin-top:12px;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Age (days)</th>
+                      <th>Title</th>
+                      <th>Year</th>
+                      <th>Added</th>
+                      <th>ID</th>
+                      <th>Path</th>
+                    </tr>
+                  </thead>
+                  <tbody>{rows}</tbody>
+                </table>
+              </div>
+              <div class="muted" style="margin-top:10px;">Showing up to 500.</div>
+            """
+
+        body = f"""
+          <div class="grid">
+            <div class="card">
+              <div class="hd">
+                <h2>Preview candidates</h2>
+                <div class="btnrow">
+                  <a class="btn" href="/settings">Adjust settings</a>
+                  <form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>
+                </div>
+              </div>
+              <div class="bd">
+                {alerts}
+                {table}
+              </div>
+            </div>
+          </div>
+        """
+
+        return render_template_string(shell("agregarr-cleanarr • Preview", "preview", body))
+
     except Exception as e:
-        return render_template_string(
-            PREVIEW_PAGE,
-            tag=cfg.get("TAG_LABEL", ""),
-            days=int(cfg.get("DAYS_OLD", 30)),
-            cutoff="",
-            error=str(e),
-            candidates=[],
-            count=0,
-        ), 500
+        body = f"""
+          <div class="grid">
+            <div class="card">
+              <div class="hd"><h2>Preview candidates</h2></div>
+              <div class="bd">
+                {alerts}
+                <div class="alert error">{str(e)}</div>
+              </div>
+            </div>
+          </div>
+        """
+        return render_template_string(shell("agregarr-cleanarr • Preview", "preview", body)), 500
 
 @app.get("/dashboard")
 def dashboard():
     state = load_state()
     last_run = state.get("last_run")
     history = state.get("run_history") or []
+    cfg = load_config()
+
+    alerts = render_alerts()
 
     if not last_run:
-        return render_template_string(DASHBOARD_PAGE, last_run=None)
+        body = f"""
+          <div class="grid">
+            <div class="card">
+              <div class="hd">
+                <h2>Dashboard</h2>
+                <div class="btnrow">
+                  <a class="btn" href="/settings">Settings</a>
+                  <a class="btn" href="/preview">Preview</a>
+                  <form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>
+                </div>
+              </div>
+              <div class="bd">
+                {alerts}
+                <div class="muted">No runs recorded yet.</div>
+                <div class="muted" style="margin-top:8px;">
+                  Start with <b>Dry Run</b> enabled, use <a href="/preview">Preview</a>, then disable Dry Run.
+                </div>
+              </div>
+            </div>
+          </div>
+        """
+        return render_template_string(shell("agregarr-cleanarr • Dashboard", "dash", body))
 
     status = (last_run.get("status") or "").lower()
     if status == "ok":
-        status_class = "ok"
+        dot = "ok"
+        status_text = "OK"
     elif status == "ok_with_errors":
-        status_class = "warn"
+        dot = "warn"
+        status_text = "OK (with errors)"
     else:
-        status_class = "bad"
+        dot = "bad"
+        status_text = "FAILED"
 
+    finished_ago = time_ago(last_run.get("finished_at"))
+    error_count = len(last_run.get("errors") or [])
     deleted_count = (
         len([d for d in (last_run.get("deleted") or []) if d.get("deleted_at")])
         if not last_run.get("dry_run") else len(last_run.get("deleted") or [])
     )
-    error_count = len(last_run.get("errors") or [])
-    finished_ago = time_ago(last_run.get("finished_at"))
 
+    # KPIs
+    kpis = f"""
+      <div class="kpi">
+        <div class="k">
+          <div class="l">Status</div>
+          <div class="v">
+            <span class="statusDot"><span class="dot {dot}"></span>{status_text}</span>
+          </div>
+        </div>
+        <div class="k">
+          <div class="l">Candidates</div>
+          <div class="v">{last_run.get("candidates_found", 0)}</div>
+        </div>
+        <div class="k">
+          <div class="l">Deleted (or would delete)</div>
+          <div class="v">{deleted_count}</div>
+        </div>
+      </div>
+    """
+
+    # Details
+    details = f"""
+      <div class="kpi" style="margin-top:12px;">
+        <div class="k half">
+          <div class="l">Finished</div>
+          <div class="v" style="font-size:14px;">
+            <code>{last_run.get("finished_at","")}</code>
+            <div class="muted" style="margin-top:6px;">{finished_ago}</div>
+          </div>
+        </div>
+        <div class="k half">
+          <div class="l">Rule</div>
+          <div class="v" style="font-size:14px; font-weight:600;">
+            Tag <code>{last_run.get("tag_label","")}</code> • older than <code>{last_run.get("days_old",0)}</code> days
+            <div class="muted" style="margin-top:6px;">
+              Dry-run: <b>{str(last_run.get("dry_run", False)).lower()}</b> • Delete files: <b>{str(last_run.get("delete_files", False)).lower()}</b>
+            </div>
+          </div>
+        </div>
+      </div>
+    """
+
+    # Errors
+    errors_html = ""
+    if error_count > 0:
+        items = "".join([f"<li>{e}</li>" for e in (last_run.get("errors") or [])[-5:]])
+        errors_html = f"""
+          <div class="card" style="margin-top:14px;">
+            <div class="hd"><h2>Last errors</h2></div>
+            <div class="bd">
+              <ul style="margin:0; padding-left: 18px;">{items}</ul>
+            </div>
+          </div>
+        """
+
+    # Deleted table
+    del_rows = ""
+    for d in (last_run.get("deleted") or [])[:50]:
+        del_rows += f"""
+          <tr>
+            <td><code>{d.get("deleted_at") or ""}</code></td>
+            <td>{d.get("age_days","")}</td>
+            <td>{d.get("title","")}</td>
+            <td>{d.get("year","")}</td>
+            <td>{d.get("id","")}</td>
+            <td class="muted">{d.get("path","") or ""}</td>
+            <td>{str(d.get("dry_run", False)).lower()}</td>
+          </tr>
+        """
+
+    deleted_table = f"""
+      <div class="card" style="margin-top:14px;">
+        <div class="hd">
+          <h2>Last deleted (most recent run)</h2>
+          <div class="muted">Showing up to 50</div>
+        </div>
+        <div class="bd">
+          <div class="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Deleted at</th>
+                  <th>Age</th>
+                  <th>Title</th>
+                  <th>Year</th>
+                  <th>ID</th>
+                  <th>Path</th>
+                  <th>Dry</th>
+                </tr>
+              </thead>
+              <tbody>
+                {del_rows if del_rows else '<tr><td colspan="7" class="muted">No entries.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    """
+
+    # History table
     ago_map = {}
     for r in history:
         fa = r.get("finished_at")
         if fa and fa not in ago_map:
             ago_map[fa] = time_ago(fa)
 
-    history_limit = int(os.environ.get("STATE_HISTORY_LIMIT", "20"))
+    hist_rows = ""
+    for r in history[:20]:
+        fa = r.get("finished_at") or ""
+        dr = bool(r.get("dry_run"))
+        delc = (len(r.get("deleted") or [])) if dr else int(r.get("deleted_count") or 0)
+        hist_rows += f"""
+          <tr>
+            <td><code>{fa}</code></td>
+            <td class="muted">{ago_map.get(fa,"")}</td>
+            <td>{r.get("status","")}</td>
+            <td><code>{r.get("tag_label","")}</code></td>
+            <td>{r.get("days_old","")}</td>
+            <td>{r.get("candidates_found","")}</td>
+            <td>{delc}</td>
+            <td>{str(dr).lower()}</td>
+            <td>{r.get("duration_seconds","")}</td>
+          </tr>
+        """
 
-    return render_template_string(
-        DASHBOARD_PAGE,
-        last_run=type("C", (), last_run),
-        status_class=status_class,
-        deleted_count=deleted_count,
-        error_count=error_count,
-        finished_ago=finished_ago,
-        history=history,
-        ago_map=ago_map,
-        history_limit=history_limit,
-    )
+    history_table = f"""
+      <div class="card" style="margin-top:14px;">
+        <div class="hd">
+          <h2>Run history (latest 20 shown)</h2>
+          <div class="btnrow">
+            <form method="post" action="/clear-state" onsubmit="return confirm('Clear dashboard history/state?');">
+              <button class="btn bad" type="submit">Clear state</button>
+            </form>
+          </div>
+        </div>
+        <div class="bd">
+          <div class="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Finished</th>
+                  <th>When</th>
+                  <th>Status</th>
+                  <th>Tag</th>
+                  <th>Days</th>
+                  <th>Candidates</th>
+                  <th>Deleted</th>
+                  <th>Dry</th>
+                  <th>Dur (s)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hist_rows if hist_rows else '<tr><td colspan="9" class="muted">No history yet.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:10px;">
+            Current config: Tag <code>{cfg.get("TAG_LABEL","")}</code> • Days <code>{cfg.get("DAYS_OLD","")}</code> • Dry-run <b>{str(cfg.get("DRY_RUN", True)).lower()}</b>
+          </div>
+        </div>
+      </div>
+    """
+
+    body = f"""
+      <div class="grid">
+        <div class="card">
+          <div class="hd">
+            <h2>Dashboard</h2>
+            <div class="btnrow">
+              <a class="btn" href="/preview">Preview</a>
+              <a class="btn" href="/settings">Settings</a>
+              <form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>
+            </div>
+          </div>
+          <div class="bd">
+            {alerts}
+            {kpis}
+            {details}
+          </div>
+        </div>
+
+        {errors_html}
+        {deleted_table}
+        {history_table}
+      </div>
+    """
+
+    return render_template_string(shell("agregarr-cleanarr • Dashboard", "dash", body))
 
 @app.post("/clear-state")
 def clear_state():
@@ -587,17 +939,40 @@ def clear_state():
 def status():
     cfg = load_config()
     state = load_state()
-    return {
-        "config_path": str(CONFIG_PATH),
-        "config_exists": CONFIG_PATH.exists(),
-        "config": cfg,
-        "state_path": str(STATE_PATH),
-        "state_exists": STATE_PATH.exists(),
-        "state": state,
-    }
+
+    body = f"""
+      <div class="grid">
+        <div class="card">
+          <div class="hd"><h2>Status</h2></div>
+          <div class="bd">
+            {render_alerts()}
+            <div class="muted">Config file: <code>{str(CONFIG_PATH)}</code> (exists: <b>{str(CONFIG_PATH.exists()).lower()}</b>)</div>
+            <div class="muted" style="margin-top:8px;">State file: <code>{str(STATE_PATH)}</code> (exists: <b>{str(STATE_PATH.exists()).lower()}</b>)</div>
+
+            <div style="margin-top:14px;" class="tablewrap">
+              <table>
+                <thead><tr><th>Key</th><th>Value</th></tr></thead>
+                <tbody>
+                  {''.join([f"<tr><td><code>{k}</code></td><td class='muted'>{str(v)}</td></tr>" for k,v in cfg.items()])}
+                </tbody>
+              </table>
+            </div>
+
+            <div style="margin-top:14px;" class="tablewrap">
+              <table>
+                <thead><tr><th>State</th><th>Value</th></tr></thead>
+                <tbody>
+                  {''.join([f"<tr><td><code>{k}</code></td><td class='muted'>{str(v)[:500]}</td></tr>" for k,v in state.items()])}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    """
+    return render_template_string(shell("agregarr-cleanarr • Status", "status", body))
 
 if __name__ == "__main__":
-    # Flask CLI args supported but not required; entrypoint passes host/port
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--host", default="0.0.0.0")
