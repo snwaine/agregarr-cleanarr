@@ -17,8 +17,13 @@ STATE_PATH = CONFIG_DIR / "state.json"
 app = Flask(__name__)
 app.secret_key = "agregarr-cleanarr-secret"
 
+
+# --------------------------
+# Config / State
+# --------------------------
 def env_default(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
+
 
 def load_config():
     # Defaults from env
@@ -33,6 +38,7 @@ def load_config():
         "CRON_SCHEDULE": env_default("CRON_SCHEDULE", "15 3 * * *"),
         "RUN_ON_STARTUP": env_default("RUN_ON_STARTUP", "false").lower() == "true",
         "HTTP_TIMEOUT_SECONDS": int(env_default("HTTP_TIMEOUT_SECONDS", "30")),
+        "UI_THEME": env_default("UI_THEME", "dark"),  # "dark" or "light"
     }
 
     if CONFIG_PATH.exists():
@@ -42,11 +48,17 @@ def load_config():
         except Exception:
             pass
 
+    # Normalize theme
+    t = (cfg.get("UI_THEME") or "dark").lower()
+    cfg["UI_THEME"] = t if t in ("dark", "light") else "dark"
+
     return cfg
+
 
 def save_config(cfg):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
 
 def load_state():
     try:
@@ -56,8 +68,10 @@ def load_state():
         pass
     return {}
 
+
 def checkbox(name: str) -> bool:
     return request.form.get(name) == "on"
+
 
 # --------------------------
 # Radarr preview helpers
@@ -65,11 +79,13 @@ def checkbox(name: str) -> bool:
 def radarr_headers(cfg):
     return {"X-Api-Key": cfg.get("RADARR_API_KEY", "")}
 
+
 def radarr_get(cfg, path: str):
     url = cfg["RADARR_URL"].rstrip("/") + path
     r = requests.get(url, headers=radarr_headers(cfg), timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)))
     r.raise_for_status()
     return r.json()
+
 
 def parse_radarr_date(s: str):
     if s.endswith("Z"):
@@ -78,6 +94,7 @@ def parse_radarr_date(s: str):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
 
 def preview_candidates(cfg):
     tag_label = cfg.get("TAG_LABEL", "autodelete30")
@@ -116,6 +133,7 @@ def preview_candidates(cfg):
     candidates.sort(key=lambda x: x["age_days"], reverse=True)
     return {"error": None, "candidates": candidates, "tag_id": tag_id, "cutoff": cutoff.isoformat()}
 
+
 # --------------------------
 # Dashboard helpers
 # --------------------------
@@ -131,6 +149,7 @@ def parse_iso(dt_str: str):
         return dt
     except Exception:
         return None
+
 
 def time_ago(dt_str: str) -> str:
     dt = parse_iso(dt_str)
@@ -150,8 +169,9 @@ def time_ago(dt_str: str) -> str:
     days = hrs // 24
     return f"{days}d ago"
 
+
 # --------------------------
-# Dark Theme Base
+# Stylish UI + Light/Dark Theme + Modal
 # --------------------------
 BASE_HEAD = """
 <meta charset="utf-8">
@@ -170,6 +190,22 @@ BASE_HEAD = """
     --warn:#f59e0b;      /* amber */
     --bad:#ef4444;       /* red */
     --shadow: 0 12px 30px rgba(0,0,0,.35);
+  }
+
+  /* Light theme overrides */
+  [data-theme="light"]{
+    --bg:#f7f8fb;
+    --panel:#ffffff;
+    --panel2:#ffffff;
+    --muted:#526171;
+    --text:#0b1220;
+    --line:#e5e7eb;
+    --line2:#d1d5db;
+    --accent:#6d28d9;    /* purple */
+    --accent2:#16a34a;   /* green */
+    --warn:#d97706;      /* amber */
+    --bad:#dc2626;       /* red */
+    --shadow: 0 12px 30px rgba(0,0,0,.08);
   }
 
   * { box-sizing: border-box; }
@@ -218,6 +254,8 @@ BASE_HEAD = """
     padding: 8px 11px;
     border-radius: 999px;
     font-size: 13px;
+    cursor: pointer;
+    color: var(--text);
   }
   .pill.active{
     border-color: rgba(124,58,237,.65);
@@ -246,6 +284,7 @@ BASE_HEAD = """
     gap:12px;
     background: rgba(0,0,0,.12);
   }
+  [data-theme="light"] .card .hd{ background: rgba(255,255,255,.55); }
   .card .hd h2{ margin:0; font-size: 14px; letter-spacing:.2px; }
   .card .bd{ padding: 14px 16px; }
 
@@ -261,6 +300,7 @@ BASE_HEAD = """
     background: rgba(0,0,0,.18);
     padding: 12px 12px;
   }
+  [data-theme="light"] .k{ background: rgba(0,0,0,.03); }
   .k .l{ color: var(--muted); font-size: 12px; }
   .k .v{ margin-top: 6px; font-size: 18px; font-weight: 700; }
 
@@ -279,6 +319,7 @@ BASE_HEAD = """
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
     font-size: 12px;
   }
+  [data-theme="light"] code{ color: #1e40af; }
 
   .btnrow{ display:flex; gap:10px; flex-wrap: wrap; }
   .btn{
@@ -333,8 +374,9 @@ BASE_HEAD = """
     padding: 10px 12px;
     background: rgba(0,0,0,.18);
   }
+  [data-theme="light"] .field{ background: rgba(0,0,0,.03); }
   .field label{ display:block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-  .field input[type=text], .field input[type=password], .field input[type=number]{
+  .field input[type=text], .field input[type=password], .field input[type=number], .field select{
     width: 100%;
     border: 1px solid var(--line2);
     background: rgba(255,255,255,.04);
@@ -343,7 +385,10 @@ BASE_HEAD = """
     border-radius: 12px;
     outline: none;
   }
-  .field input:focus{
+  [data-theme="light"] .field input, [data-theme="light"] .field select{
+    background: rgba(0,0,0,.02);
+  }
+  .field input:focus, .field select:focus{
     border-color: rgba(124,58,237,.65);
     box-shadow: 0 0 0 3px rgba(124,58,237,.15);
   }
@@ -361,6 +406,7 @@ BASE_HEAD = """
     padding: 10px 12px;
     background: rgba(0,0,0,.18);
   }
+  [data-theme="light"] .check{ background: rgba(0,0,0,.03); }
   .check input{ transform: scale(1.2); }
 
   table{
@@ -383,6 +429,7 @@ BASE_HEAD = """
     position: sticky;
     top: 0;
   }
+  [data-theme="light"] th{ color:#111827; background: rgba(0,0,0,.03); }
   tr:hover td{ background: rgba(255,255,255,.02); }
   .tablewrap{ max-height: 420px; overflow:auto; border-radius: 14px; border: 1px solid var(--line); }
 
@@ -398,21 +445,125 @@ BASE_HEAD = """
   .dot.ok{ background: var(--accent2); box-shadow: 0 0 0 4px rgba(34,197,94,.12); }
   .dot.warn{ background: var(--warn); box-shadow: 0 0 0 4px rgba(245,158,11,.12); }
   .dot.bad{ background: var(--bad); box-shadow: 0 0 0 4px rgba(239,68,68,.12); }
+
+  /* Modal */
+  .modalBack{
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.65);
+    backdrop-filter: blur(6px);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    z-index: 9999;
+    padding: 18px;
+  }
+  .modal{
+    width: min(520px, 100%);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+    box-shadow: var(--shadow);
+    overflow:hidden;
+  }
+  .modal .mh{
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 12px;
+    background: rgba(0,0,0,.18);
+  }
+  [data-theme="light"] .modal .mh{ background: rgba(0,0,0,.03); }
+  .modal .mh h3{ margin:0; font-size: 14px; letter-spacing: .2px; }
+  .modal .mb{ padding: 14px 16px; }
+  .modal .mb p{ margin: 0 0 10px 0; color: var(--text); }
+  .modal .mb .muted{ color: var(--muted); }
+  .modal .mf{
+    padding: 14px 16px;
+    border-top: 1px solid var(--line);
+    display:flex;
+    justify-content: flex-end;
+    gap: 10px;
+    background: rgba(0,0,0,.14);
+  }
+  [data-theme="light"] .modal .mf{ background: rgba(0,0,0,.02); }
+  .xbtn{
+    border: 1px solid var(--line2);
+    background: rgba(255,255,255,.03);
+    color: var(--text);
+    width: 34px; height: 34px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
 </style>
+
+<script>
+  function openRunNowModal() {
+    const back = document.getElementById("runNowBack");
+    if (back) back.style.display = "flex";
+  }
+  function closeRunNowModal() {
+    const back = document.getElementById("runNowBack");
+    if (back) back.style.display = "none";
+  }
+  function runNowSubmit() {
+    const form = document.getElementById("runNowFormConfirm");
+    if (form) form.submit();
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeRunNowModal();
+  });
+</script>
 """
+
 
 def shell(page_title: str, active: str, body: str):
     # active: 'dash' | 'settings' | 'preview' | 'status'
+    cfg = load_config()
+    theme = (cfg.get("UI_THEME") or "dark").lower()
+    if theme not in ("dark", "light"):
+        theme = "dark"
+
     def pill(name, href, key):
         cls = "pill active" if active == key else "pill"
         return f'<a class="{cls}" href="{href}">{name}</a>'
+
+    theme_label = "Light" if theme == "dark" else "Dark"
+    theme_btn = f"""
+      <form method="post" action="/toggle-theme" style="margin:0;">
+        <button class="pill" type="submit">Theme: {theme_label}</button>
+      </form>
+    """
 
     nav = (
         pill("Dashboard", "/dashboard", "dash")
         + pill("Settings", "/settings", "settings")
         + pill("Preview", "/preview", "preview")
         + pill("Status", "/status", "status")
+        + theme_btn
     )
+
+    modal = """
+    <div class="modalBack" id="runNowBack" onclick="if(event.target.id==='runNowBack'){ closeRunNowModal(); }">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="runNowTitle">
+        <div class="mh">
+          <h3 id="runNowTitle">Run Now confirmation</h3>
+          <button class="xbtn" type="button" onclick="closeRunNowModal()">✕</button>
+        </div>
+        <div class="mb">
+          <p><b>Dry Run is OFF.</b> This run may delete movie files via Radarr.</p>
+          <p class="muted">If you’re not sure, turn on <b>Dry Run</b> and use <b>Preview</b> first.</p>
+        </div>
+        <div class="mf">
+          <button class="btn" type="button" onclick="closeRunNowModal()">Cancel</button>
+          <form id="runNowFormConfirm" method="post" action="/run-now" style="margin:0;">
+            <button class="btn bad" type="button" onclick="runNowSubmit()">Yes, run now</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    """
 
     return f"""
 <!doctype html>
@@ -421,7 +572,7 @@ def shell(page_title: str, active: str, body: str):
   <title>{page_title}</title>
   {BASE_HEAD}
 </head>
-<body>
+<body data-theme="{theme}">
   <div class="wrap">
     <div class="topbar">
       <div class="brand">
@@ -436,42 +587,67 @@ def shell(page_title: str, active: str, body: str):
 
     {body}
   </div>
+
+  {modal}
 </body>
 </html>
 """
 
-# --------------------------
-# Pages
-# --------------------------
+
 def render_alerts():
-    # Inject flash messages
     html = ""
     for category, message in get_flashed_messages(with_categories=True):
         cls = "success" if category == "success" else "error"
         html += f'<div class="alert {cls}">{message}</div>'
     return html
 
+
 # --------------------------
 # Routes
 # --------------------------
-
-# Default page: dashboard
 @app.get("/")
 def home():
     return redirect("/dashboard")
 
+
+@app.post("/toggle-theme")
+def toggle_theme():
+    cfg = load_config()
+    cur = (cfg.get("UI_THEME") or "dark").lower()
+    cfg["UI_THEME"] = "light" if cur != "light" else "dark"
+    save_config(cfg)
+    flash(f"Theme set to {cfg['UI_THEME']} ✔", "success")
+    return redirect(request.referrer or "/dashboard")
+
+
 @app.get("/settings")
 def settings():
     cfg = load_config()
-
     alerts = render_alerts()
+
+    run_now_btn = (
+        '<form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>'
+        if cfg.get("DRY_RUN", True)
+        else '<button class="btn bad" type="button" onclick="openRunNowModal()">Run Now</button>'
+    )
+
+    theme_select = f"""
+      <div class="field">
+        <label>UI Theme</label>
+        <select name="UI_THEME">
+          <option value="dark" {"selected" if cfg.get("UI_THEME","dark")=="dark" else ""}>Dark</option>
+          <option value="light" {"selected" if cfg.get("UI_THEME","dark")=="light" else ""}>Light</option>
+        </select>
+      </div>
+    """
+
     body = f"""
       <div class="grid">
         <div class="card">
           <div class="hd">
             <h2>Settings</h2>
             <div class="btnrow">
-              <form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>
+              {run_now_btn}
               <form method="post" action="/apply-cron"><button class="btn warn" type="submit">Apply Cron</button></form>
             </div>
           </div>
@@ -507,6 +683,8 @@ def settings():
                   <label>HTTP Timeout Seconds</label>
                   <input type="number" min="5" name="HTTP_TIMEOUT_SECONDS" value="{cfg["HTTP_TIMEOUT_SECONDS"]}">
                 </div>
+
+                {theme_select}
               </div>
 
               <div class="checks" style="margin-top:12px;">
@@ -555,6 +733,7 @@ def settings():
 
     return render_template_string(shell("agregarr-cleanarr • Settings", "settings", body))
 
+
 @app.post("/save")
 def save():
     cfg = load_config()
@@ -565,6 +744,10 @@ def save():
     cfg["DAYS_OLD"] = int(request.form.get("DAYS_OLD") or "30")
     cfg["CRON_SCHEDULE"] = request.form.get("CRON_SCHEDULE") or "15 3 * * *"
     cfg["HTTP_TIMEOUT_SECONDS"] = int(request.form.get("HTTP_TIMEOUT_SECONDS") or "30")
+    cfg["UI_THEME"] = (request.form.get("UI_THEME") or cfg.get("UI_THEME", "dark")).lower()
+
+    if cfg["UI_THEME"] not in ("dark", "light"):
+        cfg["UI_THEME"] = "dark"
 
     cfg["DRY_RUN"] = checkbox("DRY_RUN")
     cfg["DELETE_FILES"] = checkbox("DELETE_FILES")
@@ -575,12 +758,14 @@ def save():
     flash("Settings saved ✔", "success")
     return redirect("/settings")
 
+
 @app.post("/run-now")
 def run_now():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     (CONFIG_DIR / "run_now.flag").write_text("1", encoding="utf-8")
     flash("Run Now triggered ✔ (check Dashboard/logs)", "success")
     return redirect("/dashboard")
+
 
 @app.post("/apply-cron")
 def apply_cron():
@@ -602,10 +787,17 @@ def apply_cron():
 
     return redirect("/settings")
 
+
 @app.get("/preview")
 def preview():
     cfg = load_config()
     alerts = render_alerts()
+
+    run_now_btn = (
+        '<form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>'
+        if cfg.get("DRY_RUN", True)
+        else '<button class="btn bad" type="button" onclick="openRunNowModal()">Run Now</button>'
+    )
 
     try:
         result = preview_candidates(cfg)
@@ -626,11 +818,10 @@ def preview():
               </tr>
             """
 
-        table = ""
         if error:
-            table = f'<div class="alert error">{error}</div>'
+            content = f'<div class="alert error">{error}</div>'
         else:
-            table = f"""
+            content = f"""
               <div class="muted">Found <b>{len(candidates)}</b> candidate(s). Preview only (no deletes).</div>
               <div class="muted" style="margin-top:6px;">Cutoff: <code>{cutoff}</code></div>
               <div class="tablewrap" style="margin-top:12px;">
@@ -658,12 +849,12 @@ def preview():
                 <h2>Preview candidates</h2>
                 <div class="btnrow">
                   <a class="btn" href="/settings">Adjust settings</a>
-                  <form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>
+                  {run_now_btn}
                 </div>
               </div>
               <div class="bd">
                 {alerts}
-                {table}
+                {content}
               </div>
             </div>
           </div>
@@ -685,14 +876,20 @@ def preview():
         """
         return render_template_string(shell("agregarr-cleanarr • Preview", "preview", body)), 500
 
+
 @app.get("/dashboard")
 def dashboard():
     state = load_state()
     last_run = state.get("last_run")
     history = state.get("run_history") or []
     cfg = load_config()
-
     alerts = render_alerts()
+
+    run_now_btn = (
+        '<form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>'
+        if cfg.get("DRY_RUN", True)
+        else '<button class="btn bad" type="button" onclick="openRunNowModal()">Run Now</button>'
+    )
 
     if not last_run:
         body = f"""
@@ -703,7 +900,7 @@ def dashboard():
                 <div class="btnrow">
                   <a class="btn" href="/settings">Settings</a>
                   <a class="btn" href="/preview">Preview</a>
-                  <form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>
+                  {run_now_btn}
                 </div>
               </div>
               <div class="bd">
@@ -736,7 +933,6 @@ def dashboard():
         if not last_run.get("dry_run") else len(last_run.get("deleted") or [])
     )
 
-    # KPIs
     kpis = f"""
       <div class="kpi">
         <div class="k">
@@ -756,7 +952,6 @@ def dashboard():
       </div>
     """
 
-    # Details
     details = f"""
       <div class="kpi" style="margin-top:12px;">
         <div class="k half">
@@ -778,7 +973,6 @@ def dashboard():
       </div>
     """
 
-    # Errors
     errors_html = ""
     if error_count > 0:
         items = "".join([f"<li>{e}</li>" for e in (last_run.get("errors") or [])[-5:]])
@@ -791,7 +985,6 @@ def dashboard():
           </div>
         """
 
-    # Deleted table
     del_rows = ""
     for d in (last_run.get("deleted") or [])[:50]:
         del_rows += f"""
@@ -835,7 +1028,6 @@ def dashboard():
       </div>
     """
 
-    # History table
     ago_map = {}
     for r in history:
         fa = r.get("finished_at")
@@ -907,7 +1099,7 @@ def dashboard():
             <div class="btnrow">
               <a class="btn" href="/preview">Preview</a>
               <a class="btn" href="/settings">Settings</a>
-              <form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>
+              {run_now_btn}
             </div>
           </div>
           <div class="bd">
@@ -925,6 +1117,7 @@ def dashboard():
 
     return render_template_string(shell("agregarr-cleanarr • Dashboard", "dash", body))
 
+
 @app.post("/clear-state")
 def clear_state():
     try:
@@ -935,10 +1128,14 @@ def clear_state():
         flash(f"Failed to clear state: {e}", "error")
     return redirect("/dashboard")
 
+
 @app.get("/status")
 def status():
     cfg = load_config()
     state = load_state()
+
+    cfg_rows = "".join([f"<tr><td><code>{k}</code></td><td class='muted'>{str(v)}</td></tr>" for k, v in cfg.items()])
+    state_rows = "".join([f"<tr><td><code>{k}</code></td><td class='muted'>{str(v)[:500]}</td></tr>" for k, v in state.items()])
 
     body = f"""
       <div class="grid">
@@ -951,19 +1148,15 @@ def status():
 
             <div style="margin-top:14px;" class="tablewrap">
               <table>
-                <thead><tr><th>Key</th><th>Value</th></tr></thead>
-                <tbody>
-                  {''.join([f"<tr><td><code>{k}</code></td><td class='muted'>{str(v)}</td></tr>" for k,v in cfg.items()])}
-                </tbody>
+                <thead><tr><th>Config Key</th><th>Value</th></tr></thead>
+                <tbody>{cfg_rows}</tbody>
               </table>
             </div>
 
             <div style="margin-top:14px;" class="tablewrap">
               <table>
-                <thead><tr><th>State</th><th>Value</th></tr></thead>
-                <tbody>
-                  {''.join([f"<tr><td><code>{k}</code></td><td class='muted'>{str(v)[:500]}</td></tr>" for k,v in state.items()])}
-                </tbody>
+                <thead><tr><th>State Key</th><th>Value</th></tr></thead>
+                <tbody>{state_rows}</tbody>
               </table>
             </div>
           </div>
@@ -971,6 +1164,7 @@ def status():
       </div>
     """
     return render_template_string(shell("agregarr-cleanarr • Status", "status", body))
+
 
 if __name__ == "__main__":
     import argparse
