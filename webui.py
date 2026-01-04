@@ -14,21 +14,17 @@ CONFIG_DIR = Path(os.environ.get("CONFIG_DIR", "/config"))
 CONFIG_PATH = CONFIG_DIR / "config.json"
 STATE_PATH = CONFIG_DIR / "state.json"
 
-# Logo files (put one of these in /config)
+# Logo files (put one of these in /config or /config/logo)
 LOGO_CANDIDATES = [
-    # root of /config
     CONFIG_DIR / "logo.png",
     CONFIG_DIR / "logo.jpg",
     CONFIG_DIR / "logo.jpeg",
     CONFIG_DIR / "logo.svg",
-
-    # /config/logo/ subfolder
     CONFIG_DIR / "logo" / "logo.png",
     CONFIG_DIR / "logo" / "logo.jpg",
     CONFIG_DIR / "logo" / "logo.jpeg",
     CONFIG_DIR / "logo" / "logo.svg",
 ]
-
 
 app = Flask(__name__)
 app.secret_key = "agregarr-cleanarr-secret"
@@ -54,6 +50,7 @@ def load_config():
         "RUN_ON_STARTUP": env_default("RUN_ON_STARTUP", "false").lower() == "true",
         "HTTP_TIMEOUT_SECONDS": int(env_default("HTTP_TIMEOUT_SECONDS", "30")),
         "UI_THEME": env_default("UI_THEME", "dark"),  # "dark" or "light"
+        "RADARR_OK": False,  # must pass Test to enable Save
     }
 
     if CONFIG_PATH.exists():
@@ -63,8 +60,11 @@ def load_config():
         except Exception:
             pass
 
+    # Normalize theme
     t = (cfg.get("UI_THEME") or "dark").lower()
     cfg["UI_THEME"] = t if t in ("dark", "light") else "dark"
+
+    cfg["RADARR_OK"] = bool(cfg.get("RADARR_OK", False))
     return cfg
 
 
@@ -89,7 +89,7 @@ def checkbox(name: str) -> bool:
 # --------------------------
 # Logo helpers
 # --------------------------
-def find_logo_path() -> Path | None:
+def find_logo_path():
     for p in LOGO_CANDIDATES:
         if p.exists() and p.is_file():
             return p
@@ -358,7 +358,7 @@ BASE_HEAD = """
   }
   [data-theme="light"] code{ color: #1e40af; }
 
-  .btnrow{ display:flex; gap:10px; flex-wrap: wrap; }
+  .btnrow{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
   .btn{
     border: 1px solid var(--line2);
     background: rgba(255,255,255,.03);
@@ -370,6 +370,11 @@ BASE_HEAD = """
     font-size: 13px;
   }
   .btn:hover{ border-color: rgba(124,58,237,.55); }
+  .btn:disabled{
+    opacity: .45;
+    cursor: not-allowed;
+    filter: grayscale(0.35);
+  }
   .btn.primary{
     border-color: rgba(124,58,237,.55);
     background: linear-gradient(135deg, rgba(124,58,237,.28), rgba(124,58,237,.10));
@@ -514,6 +519,17 @@ BASE_HEAD = """
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeRunNowModal();
   });
+
+  // If Radarr fields change, disable Save until Test passes again.
+  document.addEventListener("input", (e) => {
+    if (e.target && (e.target.name === "RADARR_URL" || e.target.name === "RADARR_API_KEY")) {
+      const saveBtn = document.getElementById("saveSettingsBtn");
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.title = "Test Radarr connection first";
+      }
+    }
+  });
 </script>
 """
 
@@ -543,7 +559,6 @@ def shell(page_title: str, active: str, body: str):
         + theme_btn
     )
 
-    # If logo exists, show it; otherwise show gradient badge.
     has_logo = find_logo_path() is not None
     logo_html = (
         '<div class="logoWrap"><img class="logoImg" src="/logo" alt="logo"></div>'
@@ -635,6 +650,59 @@ def toggle_theme():
     return redirect(request.referrer or "/dashboard")
 
 
+@app.post("/test-radarr")
+def test_radarr():
+    cfg = load_config()
+
+    # Allow testing unsaved form values.
+    url = (request.form.get("RADARR_URL") or cfg.get("RADARR_URL") or "").rstrip("/")
+    api_key = request.form.get("RADARR_API_KEY") or cfg.get("RADARR_API_KEY") or ""
+
+    # Default to NOT OK unless we prove otherwise.
+    cfg["RADARR_OK"] = False
+    save_config(cfg)
+
+    if not url:
+        flash("Radarr URL is empty.", "error")
+        return redirect("/settings")
+    if not api_key:
+        flash("Radarr API Key is empty.", "error")
+        return redirect("/settings")
+
+    try:
+        r = requests.get(
+            url + "/api/v3/system/status",
+            headers={"X-Api-Key": api_key},
+            timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)),
+        )
+        if r.status_code in (401, 403):
+            flash("Radarr connection failed: Unauthorized (API key incorrect).", "error")
+            return redirect("/settings")
+
+        r.raise_for_status()
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+
+        version = data.get("version") or "unknown"
+        instance = data.get("instanceName") or ""
+        app_name = data.get("appName") or "Radarr"
+        extra = f" • instance: {instance}" if instance else ""
+
+        cfg["RADARR_OK"] = True
+        save_config(cfg)
+
+        flash(f"✅ Connected to {app_name} (version {version}){extra}", "success")
+        return redirect("/settings")
+
+    except requests.exceptions.ConnectTimeout:
+        flash("Radarr connection failed: timeout connecting to the host.", "error")
+    except requests.exceptions.ConnectionError:
+        flash("Radarr connection failed: could not connect (URL/host/network).", "error")
+    except Exception as e:
+        flash(f"Radarr connection failed: {e}", "error")
+
+    return redirect("/settings")
+
+
 @app.get("/settings")
 def settings():
     cfg = load_config()
@@ -645,6 +713,10 @@ def settings():
         if cfg.get("DRY_RUN", True)
         else '<button class="btn bad" type="button" onclick="openRunNowModal()">Run Now</button>'
     )
+
+    radarr_ok = bool(cfg.get("RADARR_OK"))
+    save_disabled_attr = "disabled" if not radarr_ok else ""
+    save_title = "Test Radarr connection first" if not radarr_ok else "Save settings"
 
     body = f"""
       <div class="grid">
@@ -668,9 +740,6 @@ def settings():
               <div class="card" style="box-shadow:none; margin-bottom:14px;">
                 <div class="hd">
                   <h2>Radarr setup</h2>
-                  <div class="btnrow">
-                    <button class="btn" type="submit" formaction="/test-radarr" formmethod="post">Test connection</button>
-                  </div>
                 </div>
                 <div class="bd">
                   <div class="form">
@@ -683,8 +752,9 @@ def settings():
                       <input type="password" name="RADARR_API_KEY" value="{cfg["RADARR_API_KEY"]}">
                     </div>
                   </div>
-                  <div class="muted" style="margin-top:10px;">
-                    Tests <code>/api/v3/system/status</code> with your URL + API key.
+
+                  <div class="btnrow" style="margin-top:14px;">
+                    <button class="btn good" type="submit" formaction="/test-radarr" formmethod="post">✓</button>
                   </div>
                 </div>
               </div>
@@ -761,7 +831,9 @@ def settings():
               </div>
 
               <div class="btnrow" style="margin-top:14px;">
-                <button class="btn primary" type="submit">Save Settings</button>
+                <button id="saveSettingsBtn" class="btn primary" type="submit" {save_disabled_attr} title="{save_title}">
+                  Save Settings
+                </button>
                 <a class="btn" href="/preview" style="display:inline-flex; align-items:center;">Preview Candidates</a>
               </div>
             </form>
@@ -772,8 +844,10 @@ def settings():
     """
     return render_template_string(shell("agregarr-cleanarr • Settings", "settings", body))
 
+
 @app.post("/save")
 def save():
+    old = load_config()
     cfg = load_config()
 
     cfg["RADARR_URL"] = (request.form.get("RADARR_URL") or "").rstrip("/")
@@ -791,6 +865,15 @@ def save():
     cfg["ADD_IMPORT_EXCLUSION"] = checkbox("ADD_IMPORT_EXCLUSION")
     cfg["RUN_ON_STARTUP"] = checkbox("RUN_ON_STARTUP")
 
+    # If Radarr creds changed, require retest.
+    if old.get("RADARR_URL") != cfg["RADARR_URL"] or old.get("RADARR_API_KEY") != cfg["RADARR_API_KEY"]:
+        cfg["RADARR_OK"] = False
+
+    # Enforce: cannot save unless Radarr OK (matches disabled UI)
+    if not cfg.get("RADARR_OK", False):
+        flash("Please click ✓ to Test Radarr connection before saving.", "error")
+        return redirect("/settings")
+
     save_config(cfg)
     flash("Settings saved ✔", "success")
     return redirect("/settings")
@@ -803,51 +886,6 @@ def run_now():
     flash("Run Now triggered ✔ (check Dashboard/logs)", "success")
     return redirect("/dashboard")
 
-@app.post("/test-radarr")
-def test_radarr():
-    cfg = load_config()
-
-    # If the user is mid-edit, allow form values to be tested (without saving)
-    url = (request.form.get("RADARR_URL") or cfg.get("RADARR_URL") or "").rstrip("/")
-    api_key = request.form.get("RADARR_API_KEY") or cfg.get("RADARR_API_KEY") or ""
-
-    if not url:
-        flash("Radarr URL is empty.", "error")
-        return redirect("/settings")
-
-    if not api_key:
-        flash("Radarr API Key is empty.", "error")
-        return redirect("/settings")
-
-    try:
-        r = requests.get(
-            url + "/api/v3/system/status",
-            headers={"X-Api-Key": api_key},
-            timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)),
-        )
-        if r.status_code in (401, 403):
-            flash("Radarr connection failed: Unauthorized (API key incorrect).", "error")
-            return redirect("/settings")
-
-        r.raise_for_status()
-        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
-
-        version = data.get("version") or "unknown"
-        instance = data.get("instanceName") or ""
-        app_name = data.get("appName") or "Radarr"
-
-        extra = f" • instance: {instance}" if instance else ""
-        flash(f"✅ Connected to {app_name} (version {version}){extra}", "success")
-        return redirect("/settings")
-
-    except requests.exceptions.ConnectTimeout:
-        flash("Radarr connection failed: timeout connecting to the host.", "error")
-    except requests.exceptions.ConnectionError:
-        flash("Radarr connection failed: could not connect (URL/host/network).", "error")
-    except Exception as e:
-        flash(f"Radarr connection failed: {e}", "error")
-
-    return redirect("/settings")
 
 @app.post("/apply-cron")
 def apply_cron():
