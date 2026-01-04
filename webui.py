@@ -648,6 +648,7 @@ def settings():
 
     body = f"""
       <div class="grid">
+
         <div class="card">
           <div class="hd">
             <h2>Settings</h2>
@@ -658,79 +659,105 @@ def settings():
           </div>
           <div class="bd">
             <div class="muted">Saved to <code>/config/config.json</code>. Cron changes need <b>Apply Cron</b>.</div>
-            <div class="muted" style="margin-top:6px;">Logo: put <code>logo.png</code> (or jpg/svg) in <code>/config</code> to replace the badge.</div>
+            <div class="muted" style="margin-top:6px;">Logo: put <code>logo.png</code> (or jpg/svg) in <code>/config</code> or <code>/config/logo</code>.</div>
             {alerts}
 
             <form method="post" action="/save" style="margin-top:14px;">
-              <div class="form">
-                <div class="field">
-                  <label>Radarr URL</label>
-                  <input type="text" name="RADARR_URL" value="{cfg["RADARR_URL"]}">
-                </div>
-                <div class="field">
-                  <label>Radarr API Key</label>
-                  <input type="password" name="RADARR_API_KEY" value="{cfg["RADARR_API_KEY"]}">
-                </div>
 
-                <div class="field">
-                  <label>Tag Label</label>
-                  <input type="text" name="TAG_LABEL" value="{cfg["TAG_LABEL"]}">
+              <!-- Radarr setup group -->
+              <div class="card" style="box-shadow:none; margin-bottom:14px;">
+                <div class="hd">
+                  <h2>Radarr setup</h2>
+                  <div class="btnrow">
+                    <button class="btn" type="submit" formaction="/test-radarr" formmethod="post">Test connection</button>
+                  </div>
                 </div>
-                <div class="field">
-                  <label>Days Old</label>
-                  <input type="number" min="1" name="DAYS_OLD" value="{cfg["DAYS_OLD"]}">
-                </div>
-
-                <div class="field">
-                  <label>Cron Schedule</label>
-                  <input type="text" name="CRON_SCHEDULE" value="{cfg["CRON_SCHEDULE"]}">
-                </div>
-                <div class="field">
-                  <label>HTTP Timeout Seconds</label>
-                  <input type="number" min="5" name="HTTP_TIMEOUT_SECONDS" value="{cfg["HTTP_TIMEOUT_SECONDS"]}">
-                </div>
-
-                <div class="field">
-                  <label>UI Theme</label>
-                  <select name="UI_THEME">
-                    <option value="dark" {"selected" if cfg.get("UI_THEME","dark")=="dark" else ""}>Dark</option>
-                    <option value="light" {"selected" if cfg.get("UI_THEME","dark")=="light" else ""}>Light</option>
-                  </select>
+                <div class="bd">
+                  <div class="form">
+                    <div class="field">
+                      <label>Radarr URL</label>
+                      <input type="text" name="RADARR_URL" value="{cfg["RADARR_URL"]}">
+                    </div>
+                    <div class="field">
+                      <label>Radarr API Key</label>
+                      <input type="password" name="RADARR_API_KEY" value="{cfg["RADARR_API_KEY"]}">
+                    </div>
+                  </div>
+                  <div class="muted" style="margin-top:10px;">
+                    Tests <code>/api/v3/system/status</code> with your URL + API key.
+                  </div>
                 </div>
               </div>
 
-              <div class="checks" style="margin-top:12px;">
-                <label class="check">
-                  <input type="checkbox" name="DRY_RUN" {"checked" if cfg["DRY_RUN"] else ""}>
-                  <div>
-                    <div style="font-weight:700;">Dry Run</div>
-                    <div class="muted">Log only; no deletes.</div>
-                  </div>
-                </label>
+              <!-- Cleanup + schedule group -->
+              <div class="card" style="box-shadow:none; margin-bottom:14px;">
+                <div class="hd">
+                  <h2>Cleanup rules</h2>
+                  <div class="muted">What gets deleted</div>
+                </div>
+                <div class="bd">
+                  <div class="form">
+                    <div class="field">
+                      <label>Tag Label</label>
+                      <input type="text" name="TAG_LABEL" value="{cfg["TAG_LABEL"]}">
+                    </div>
+                    <div class="field">
+                      <label>Days Old</label>
+                      <input type="number" min="1" name="DAYS_OLD" value="{cfg["DAYS_OLD"]}">
+                    </div>
 
-                <label class="check">
-                  <input type="checkbox" name="DELETE_FILES" {"checked" if cfg["DELETE_FILES"] else ""}>
-                  <div>
-                    <div style="font-weight:700;">Delete Files</div>
-                    <div class="muted">Remove movie files from disk.</div>
-                  </div>
-                </label>
+                    <div class="field">
+                      <label>Cron Schedule</label>
+                      <input type="text" name="CRON_SCHEDULE" value="{cfg["CRON_SCHEDULE"]}">
+                    </div>
+                    <div class="field">
+                      <label>HTTP Timeout Seconds</label>
+                      <input type="number" min="5" name="HTTP_TIMEOUT_SECONDS" value="{cfg["HTTP_TIMEOUT_SECONDS"]}">
+                    </div>
 
-                <label class="check">
-                  <input type="checkbox" name="ADD_IMPORT_EXCLUSION" {"checked" if cfg["ADD_IMPORT_EXCLUSION"] else ""}>
-                  <div>
-                    <div style="font-weight:700;">Add Import Exclusion</div>
-                    <div class="muted">Prevents Radarr re-import.</div>
+                    <div class="field">
+                      <label>UI Theme</label>
+                      <select name="UI_THEME">
+                        <option value="dark" {"selected" if cfg.get("UI_THEME","dark")=="dark" else ""}>Dark</option>
+                        <option value="light" {"selected" if cfg.get("UI_THEME","dark")=="light" else ""}>Light</option>
+                      </select>
+                    </div>
                   </div>
-                </label>
 
-                <label class="check">
-                  <input type="checkbox" name="RUN_ON_STARTUP" {"checked" if cfg["RUN_ON_STARTUP"] else ""}>
-                  <div>
-                    <div style="font-weight:700;">Run on startup</div>
-                    <div class="muted">Run once when container starts.</div>
+                  <div class="checks" style="margin-top:12px;">
+                    <label class="check">
+                      <input type="checkbox" name="DRY_RUN" {"checked" if cfg["DRY_RUN"] else ""}>
+                      <div>
+                        <div style="font-weight:700;">Dry Run</div>
+                        <div class="muted">Log only; no deletes.</div>
+                      </div>
+                    </label>
+
+                    <label class="check">
+                      <input type="checkbox" name="DELETE_FILES" {"checked" if cfg["DELETE_FILES"] else ""}>
+                      <div>
+                        <div style="font-weight:700;">Delete Files</div>
+                        <div class="muted">Remove movie files from disk.</div>
+                      </div>
+                    </label>
+
+                    <label class="check">
+                      <input type="checkbox" name="ADD_IMPORT_EXCLUSION" {"checked" if cfg["ADD_IMPORT_EXCLUSION"] else ""}>
+                      <div>
+                        <div style="font-weight:700;">Add Import Exclusion</div>
+                        <div class="muted">Prevents Radarr re-import.</div>
+                      </div>
+                    </label>
+
+                    <label class="check">
+                      <input type="checkbox" name="RUN_ON_STARTUP" {"checked" if cfg["RUN_ON_STARTUP"] else ""}>
+                      <div>
+                        <div style="font-weight:700;">Run on startup</div>
+                        <div class="muted">Run once when container starts.</div>
+                      </div>
+                    </label>
                   </div>
-                </label>
+                </div>
               </div>
 
               <div class="btnrow" style="margin-top:14px;">
@@ -740,10 +767,10 @@ def settings():
             </form>
           </div>
         </div>
+
       </div>
     """
     return render_template_string(shell("agregarr-cleanarr • Settings", "settings", body))
-
 
 @app.post("/save")
 def save():
@@ -776,6 +803,51 @@ def run_now():
     flash("Run Now triggered ✔ (check Dashboard/logs)", "success")
     return redirect("/dashboard")
 
+@app.post("/test-radarr")
+def test_radarr():
+    cfg = load_config()
+
+    # If the user is mid-edit, allow form values to be tested (without saving)
+    url = (request.form.get("RADARR_URL") or cfg.get("RADARR_URL") or "").rstrip("/")
+    api_key = request.form.get("RADARR_API_KEY") or cfg.get("RADARR_API_KEY") or ""
+
+    if not url:
+        flash("Radarr URL is empty.", "error")
+        return redirect("/settings")
+
+    if not api_key:
+        flash("Radarr API Key is empty.", "error")
+        return redirect("/settings")
+
+    try:
+        r = requests.get(
+            url + "/api/v3/system/status",
+            headers={"X-Api-Key": api_key},
+            timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)),
+        )
+        if r.status_code in (401, 403):
+            flash("Radarr connection failed: Unauthorized (API key incorrect).", "error")
+            return redirect("/settings")
+
+        r.raise_for_status()
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+
+        version = data.get("version") or "unknown"
+        instance = data.get("instanceName") or ""
+        app_name = data.get("appName") or "Radarr"
+
+        extra = f" • instance: {instance}" if instance else ""
+        flash(f"✅ Connected to {app_name} (version {version}){extra}", "success")
+        return redirect("/settings")
+
+    except requests.exceptions.ConnectTimeout:
+        flash("Radarr connection failed: timeout connecting to the host.", "error")
+    except requests.exceptions.ConnectionError:
+        flash("Radarr connection failed: could not connect (URL/host/network).", "error")
+    except Exception as e:
+        flash(f"Radarr connection failed: {e}", "error")
+
+    return redirect("/settings")
 
 @app.post("/apply-cron")
 def apply_cron():
