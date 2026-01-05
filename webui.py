@@ -35,13 +35,13 @@ app.secret_key = "mediareaparr-secret"
 
 
 # --------------------------
-# Config / State
+# Helpers
 # --------------------------
 def env_default(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
 
-def _clamp_int(v: int, lo: int, hi: int, default: int) -> int:
+def _clamp_int(v, lo: int, hi: int, default: int) -> int:
     try:
         v = int(v)
     except Exception:
@@ -64,11 +64,10 @@ def _parse_cron_to_day_hour(expr: str) -> Tuple[str, int]:
     if len(parts) != 5:
         return ("daily", 3)
 
-    minute, hour, dom, month, dow = parts
-    # we assume minute is fixed; we only expose day/hour UI
-    hour_i = _clamp_int(hour, 0, 23, 3) if hour.isdigit() else 3
+    minute, hour, dom, month, dow = parts  # noqa: F841
+    hour_i = _clamp_int(hour, 0, 23, 3) if str(hour).isdigit() else 3
 
-    dow = dow.lower()
+    dow = str(dow).lower()
     day_map = {
         "*": "daily",
         "0": "sun", "7": "sun",
@@ -88,7 +87,7 @@ def _parse_cron_to_day_hour(expr: str) -> Tuple[str, int]:
     }
     day_key = day_map.get(dow, "daily")
 
-    # If dow isn't "*" or a single value, we fall back
+    # If dow isn't "*" or a single value, fall back
     if day_key != "daily" and ("," in dow or "-" in dow or "/" in dow):
         return ("daily", hour_i)
 
@@ -115,6 +114,9 @@ def _day_hour_to_cron(day_key: str, hour: int) -> str:
     return f"15 {hour} * * {dow}"
 
 
+# --------------------------
+# Config / State
+# --------------------------
 def load_config():
     cfg = {
         "RADARR_URL": env_default("RADARR_URL", "http://radarr:7878").rstrip("/"),
@@ -299,7 +301,7 @@ def render_toasts() -> str:
 
 
 # --------------------------
-# UI (Green accent in DARK theme) + Scheduler day/hour selector
+# UI (Green accent in DARK theme) + Scheduler sync JS (NOT in f-strings)
 # --------------------------
 BASE_HEAD = """
 <meta charset="utf-8">
@@ -535,6 +537,7 @@ BASE_HEAD = """
     gap:10px;
     flex-wrap: wrap;
     align-items:flex-end;
+    margin-top: 12px;
   }
   .schedRow .field{
     flex: 1 1 220px;
@@ -633,15 +636,12 @@ BASE_HEAD = """
   }
   .toast.ok{ border-color: rgba(34,197,94,.55); }
   .toast.err{ border-color: rgba(239,68,68,.55); }
-  @keyframes toastIn {
-    to { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes toastOut {
-    to { opacity: 0; transform: translateY(10px); }
-  }
+  @keyframes toastIn { to { opacity: 1; transform: translateY(0); } }
+  @keyframes toastOut { to { opacity: 0; transform: translateY(10px); } }
 </style>
 
 <script>
+  // ---- Run Now modal ----
   function openRunNowModal() {
     const back = document.getElementById("runNowBack");
     if (back) back.style.display = "flex";
@@ -658,6 +658,7 @@ BASE_HEAD = """
     if (e.key === "Escape") closeRunNowModal();
   });
 
+  // ---- Dirty + Save logic ----
   function isDirty(settingsForm) {
     if (!settingsForm) return false;
     const els = settingsForm.querySelectorAll("input, select, textarea");
@@ -709,6 +710,33 @@ BASE_HEAD = """
   document.addEventListener("input", onSettingsEdited);
   document.addEventListener("change", onSettingsEdited);
 
+  // ---- Scheduler day/hour -> cron sync ----
+  function buildCron(dayKey, hourStr) {
+    const h = parseInt(hourStr || "3", 10);
+    const hour = isNaN(h) ? 3 : Math.max(0, Math.min(23, h));
+    const dowMap = { daily:"*", sun:"0", mon:"1", tue:"2", wed:"3", thu:"4", fri:"5", sat:"6" };
+    const key = (dayKey || "daily").toLowerCase();
+    const dow = (dowMap[key] !== undefined) ? dowMap[key] : "*";
+    return "15 " + hour + " * * " + dow;
+  }
+
+  function syncCronFromSelectors() {
+    const daySel = document.querySelector('select[name="SCHED_DAY"]');
+    const hourSel = document.querySelector('select[name="SCHED_HOUR"]');
+    const cronInput = document.getElementById("CRON_SCHEDULE");
+    const cronPreview = document.getElementById("cronPreview");
+    if (!daySel || !hourSel || !cronInput) return;
+
+    const cron = buildCron(daySel.value, hourSel.value);
+    cronInput.value = cron;
+    if (cronPreview) cronPreview.textContent = cron;
+
+    // Trigger "dirty" logic
+    cronInput.dispatchEvent(new Event("input", { bubbles: true }));
+    cronInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // ---- Scroll restore + toast cleanup ----
   (function () {
     const KEY = "mediareaparr_scroll_y";
     let t = null;
@@ -726,6 +754,15 @@ BASE_HEAD = """
     });
 
     document.addEventListener("DOMContentLoaded", () => {
+      // Scheduler listeners (if present)
+      const daySel = document.querySelector('select[name="SCHED_DAY"]');
+      const hourSel = document.querySelector('select[name="SCHED_HOUR"]');
+      if (daySel) daySel.addEventListener("change", syncCronFromSelectors);
+      if (hourSel) hourSel.addEventListener("change", syncCronFromSelectors);
+
+      // Ensure preview matches selector values
+      syncCronFromSelectors();
+
       updateSaveState();
 
       const y = parseInt(sessionStorage.getItem(KEY) || "0", 10);
@@ -735,7 +772,6 @@ BASE_HEAD = """
         });
       }
 
-      // Auto-remove toast host after animations complete (~6s)
       const host = document.getElementById("toastHost");
       if (host) {
         setTimeout(() => { try { host.remove(); } catch(e){} }, 6000);
@@ -930,7 +966,6 @@ def settings():
 
     body = f"""
       <div class="grid">
-
         <div class="card">
           <div class="hd">
             <h2>Settings</h2>
@@ -939,32 +974,28 @@ def settings():
               <form method="post" action="/apply-cron"><button class="btn warn" type="submit">Apply Cron</button></form>
             </div>
           </div>
-          <div class="bd">
 
+          <div class="bd">
             <form id="settingsForm"
                   method="post"
                   action="/save"
                   data-radarr-ok="{ '1' if radarr_ok else '0' }"
                   style="margin-top:0px;">
 
-              <!-- Radarr setup group -->
+              <!-- Radarr setup -->
               <div class="card" style="box-shadow:none; margin-bottom:14px;">
-                <div class="hd">
-                  <h2>Radarr setup</h2>
-                </div>
+                <div class="hd"><h2>Radarr setup</h2></div>
                 <div class="bd">
                   <div class="form">
                     <div class="field">
                       <label>Radarr URL</label>
-                      <input type="text"
-                             name="RADARR_URL"
+                      <input type="text" name="RADARR_URL"
                              value="{cfg["RADARR_URL"]}"
                              data-initial="{cfg["RADARR_URL"]}">
                     </div>
                     <div class="field">
                       <label>Radarr API Key</label>
-                      <input type="password"
-                             name="RADARR_API_KEY"
+                      <input type="password" name="RADARR_API_KEY"
                              value="{cfg["RADARR_API_KEY"]}"
                              data-initial="{cfg["RADARR_API_KEY"]}">
                     </div>
@@ -982,7 +1013,7 @@ def settings():
                 </div>
               </div>
 
-              <!-- Cleanup + schedule group -->
+              <!-- Cleanup rules -->
               <div class="card" style="box-shadow:none; margin-bottom:14px;">
                 <div class="hd">
                   <h2>Cleanup rules</h2>
@@ -993,23 +1024,19 @@ def settings():
                   <div class="form">
                     <div class="field">
                       <label>Tag Label</label>
-                      <input type="text"
-                             name="TAG_LABEL"
+                      <input type="text" name="TAG_LABEL"
                              value="{cfg["TAG_LABEL"]}"
                              data-initial="{cfg["TAG_LABEL"]}">
                     </div>
                     <div class="field">
                       <label>Days Old</label>
-                      <input type="number"
-                             min="1"
-                             name="DAYS_OLD"
+                      <input type="number" min="1" name="DAYS_OLD"
                              value="{cfg["DAYS_OLD"]}"
                              data-initial="{cfg["DAYS_OLD"]}">
                     </div>
                   </div>
 
-                  <!-- Scheduler day/hour selector -->
-                  <div class="schedRow" style="margin-top:12px;">
+                  <div class="schedRow">
                     <div class="field">
                       <label>Scheduler Day</label>
                       <select name="SCHED_DAY" data-initial="{day_key}">
@@ -1031,7 +1058,6 @@ def settings():
                     </div>
                   </div>
 
-                  <!-- Hidden cron string derived from day/hour -->
                   <input type="hidden"
                          id="CRON_SCHEDULE"
                          name="CRON_SCHEDULE"
@@ -1045,13 +1071,10 @@ def settings():
                   <div class="form" style="margin-top:12px;">
                     <div class="field">
                       <label>HTTP Timeout Seconds</label>
-                      <input type="number"
-                             min="5"
-                             name="HTTP_TIMEOUT_SECONDS"
+                      <input type="number" min="5" name="HTTP_TIMEOUT_SECONDS"
                              value="{cfg["HTTP_TIMEOUT_SECONDS"]}"
                              data-initial="{cfg["HTTP_TIMEOUT_SECONDS"]}">
                     </div>
-
                     <div class="field">
                       <label>UI Theme</label>
                       <select name="UI_THEME" data-initial="{cfg.get("UI_THEME","dark")}">
@@ -1063,8 +1086,7 @@ def settings():
 
                   <div class="checks" style="margin-top:12px;">
                     <label class="check">
-                      <input type="checkbox"
-                             name="DRY_RUN"
+                      <input type="checkbox" name="DRY_RUN"
                              {"checked" if cfg["DRY_RUN"] else ""}
                              data-initial="{ '1' if cfg['DRY_RUN'] else '0' }">
                       <div>
@@ -1074,8 +1096,7 @@ def settings():
                     </label>
 
                     <label class="check">
-                      <input type="checkbox"
-                             name="DELETE_FILES"
+                      <input type="checkbox" name="DELETE_FILES"
                              {"checked" if cfg["DELETE_FILES"] else ""}
                              data-initial="{ '1' if cfg['DELETE_FILES'] else '0' }">
                       <div>
@@ -1085,8 +1106,7 @@ def settings():
                     </label>
 
                     <label class="check">
-                      <input type="checkbox"
-                             name="ADD_IMPORT_EXCLUSION"
+                      <input type="checkbox" name="ADD_IMPORT_EXCLUSION"
                              {"checked" if cfg["ADD_IMPORT_EXCLUSION"] else ""}
                              data-initial="{ '1' if cfg['ADD_IMPORT_EXCLUSION'] else '0' }">
                       <div>
@@ -1096,8 +1116,7 @@ def settings():
                     </label>
 
                     <label class="check">
-                      <input type="checkbox"
-                             name="RUN_ON_STARTUP"
+                      <input type="checkbox" name="RUN_ON_STARTUP"
                              {"checked" if cfg["RUN_ON_STARTUP"] else ""}
                              data-initial="{ '1' if cfg['RUN_ON_STARTUP'] else '0' }">
                       <div>
@@ -1106,59 +1125,20 @@ def settings():
                       </div>
                     </label>
                   </div>
+
                 </div>
               </div>
 
               <div class="btnrow" style="margin-top:14px;">
-                <button id="saveSettingsBtn"
-                        class="btn primary"
-                        type="submit"
-                        disabled
+                <button id="saveSettingsBtn" class="btn primary" type="submit" disabled
                         title="No changes to save">Save Settings</button>
                 <a class="btn" href="/preview" style="display:inline-flex; align-items:center;">Preview Candidates</a>
               </div>
+
             </form>
           </div>
         </div>
-
       </div>
-
-<script>
-  // Keep CRON_SCHEDULE in sync with Scheduler Day/Time selectors.
-  function buildCron(dayKey, hourStr) {
-    const h = parseInt(hourStr || "3", 10);
-    const hour = isNaN(h) ? 3 : Math.max(0, Math.min(23, h));
-    const dowMap = { daily:"*", sun:"0", mon:"1", tue:"2", wed:"3", thu:"4", fri:"5", sat:"6" };
-    const dow = dowMap[(dayKey || "daily").toLowerCase()] ?? "*";
-    return `15 ${hour} * * ${dow}`;
-  }
-
-  function syncCronFromSelectors() {
-    const daySel = document.querySelector('select[name="SCHED_DAY"]');
-    const hourSel = document.querySelector('select[name="SCHED_HOUR"]');
-    const cronInput = document.getElementById("CRON_SCHEDULE");
-    const cronPreview = document.getElementById("cronPreview");
-    if (!daySel || !hourSel || !cronInput) return;
-
-    const cron = buildCron(daySel.value, hourSel.value);
-    cronInput.value = cron;
-    if (cronPreview) cronPreview.textContent = cron;
-
-    // Trigger "dirty" logic
-    cronInput.dispatchEvent(new Event("input", { bubbles: true }));
-    cronInput.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  document.addEventListener("DOMContentLoaded", () => {
-    const daySel = document.querySelector('select[name="SCHED_DAY"]');
-    const hourSel = document.querySelector('select[name="SCHED_HOUR"]');
-    if (daySel) daySel.addEventListener("change", syncCronFromSelectors);
-    if (hourSel) hourSel.addEventListener("change", syncCronFromSelectors);
-
-    // Ensure preview matches initial derived values
-    syncCronFromSelectors();
-  });
-</script>
     """
     return render_template_string(shell("mediareaparr • Settings", "settings", body))
 
@@ -1173,7 +1153,7 @@ def save():
     cfg["TAG_LABEL"] = request.form.get("TAG_LABEL") or "autodelete30"
     cfg["DAYS_OLD"] = int(request.form.get("DAYS_OLD") or "30")
 
-    # Day/hour selectors are converted into a cron string (minute fixed at 15)
+    # Day/hour -> cron string (minute fixed at 15)
     sched_day = (request.form.get("SCHED_DAY") or "daily").lower()
     sched_hour = _clamp_int(request.form.get("SCHED_HOUR") or 3, 0, 23, 3)
     cfg["CRON_SCHEDULE"] = _day_hour_to_cron(sched_day, sched_hour)
