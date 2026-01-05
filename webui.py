@@ -3,7 +3,7 @@ import json
 import signal
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 import requests
 from flask import (
@@ -39,6 +39,80 @@ app.secret_key = "mediareaparr-secret"
 # --------------------------
 def env_default(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
+
+
+def _clamp_int(v: int, lo: int, hi: int, default: int) -> int:
+    try:
+        v = int(v)
+    except Exception:
+        return default
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
+
+def _parse_cron_to_day_hour(expr: str) -> Tuple[str, int]:
+    """
+    Supports the common pattern we write: 'MIN HOUR * * DOW'
+    If unknown/unparseable, returns ('daily', 3).
+    """
+    if not expr:
+        return ("daily", 3)
+    parts = expr.strip().split()
+    if len(parts) != 5:
+        return ("daily", 3)
+
+    minute, hour, dom, month, dow = parts
+    # we assume minute is fixed; we only expose day/hour UI
+    hour_i = _clamp_int(hour, 0, 23, 3) if hour.isdigit() else 3
+
+    dow = dow.lower()
+    day_map = {
+        "*": "daily",
+        "0": "sun", "7": "sun",
+        "1": "mon",
+        "2": "tue",
+        "3": "wed",
+        "4": "thu",
+        "5": "fri",
+        "6": "sat",
+        "sun": "sun",
+        "mon": "mon",
+        "tue": "tue",
+        "wed": "wed",
+        "thu": "thu",
+        "fri": "fri",
+        "sat": "sat",
+    }
+    day_key = day_map.get(dow, "daily")
+
+    # If dow isn't "*" or a single value, we fall back
+    if day_key != "daily" and ("," in dow or "-" in dow or "/" in dow):
+        return ("daily", hour_i)
+
+    return (day_key, hour_i)
+
+
+def _day_hour_to_cron(day_key: str, hour: int) -> str:
+    """
+    Emits: '15 HOUR * * DOW' (minute fixed at 15).
+    day_key: daily|mon|tue|wed|thu|fri|sat|sun
+    """
+    hour = _clamp_int(hour, 0, 23, 3)
+    dow_map = {
+        "daily": "*",
+        "sun": "0",
+        "mon": "1",
+        "tue": "2",
+        "wed": "3",
+        "thu": "4",
+        "fri": "5",
+        "sat": "6",
+    }
+    dow = dow_map.get((day_key or "daily").lower(), "*")
+    return f"15 {hour} * * {dow}"
 
 
 def load_config():
@@ -225,7 +299,7 @@ def render_toasts() -> str:
 
 
 # --------------------------
-# UI (Green accent in DARK theme)
+# UI (Green accent in DARK theme) + Scheduler day/hour selector
 # --------------------------
 BASE_HEAD = """
 <meta charset="utf-8">
@@ -258,7 +332,6 @@ BASE_HEAD = """
     --line:#e5e7eb;
     --line2:#d1d5db;
 
-    /* keep light theme accent slightly purple for contrast */
     --accent:#6d28d9;
     --accent2:#7c3aed;
 
@@ -455,6 +528,18 @@ BASE_HEAD = """
   }
   [data-theme="light"] .check{ background: rgba(0,0,0,.03); }
   .check input{ transform: scale(1.2); }
+
+  /* scheduler helper */
+  .schedRow{
+    display:flex;
+    gap:10px;
+    flex-wrap: wrap;
+    align-items:flex-end;
+  }
+  .schedRow .field{
+    flex: 1 1 220px;
+    margin: 0;
+  }
 
   table{ width:100%; border-collapse: collapse; overflow:hidden; border-radius: 14px; border: 1px solid var(--line); }
   th, td{ padding: 10px 10px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
@@ -819,6 +904,9 @@ def test_radarr():
 def settings():
     cfg = load_config()
 
+    # Parse current CRON into day/hour selector defaults
+    day_key, hour_val = _parse_cron_to_day_hour(cfg.get("CRON_SCHEDULE", "15 3 * * *"))
+
     run_now_btn = (
         '<form method="post" action="/run-now"><button class="btn good" type="submit">Run Now</button></form>'
         if cfg.get("DRY_RUN", True)
@@ -829,6 +917,16 @@ def settings():
     test_label = "Connected" if radarr_ok else "Test Connection"
     test_disabled_attr = "disabled" if radarr_ok else ""
     test_title = "Radarr connection is OK" if radarr_ok else "Test Radarr connection"
+
+    def day_opt(val, label):
+        sel = "selected" if day_key == val else ""
+        return f'<option value="{val}" {sel}>{label}</option>'
+
+    hour_options = []
+    for h in range(0, 24):
+        sel = "selected" if h == hour_val else ""
+        hour_options.append(f'<option value="{h}" {sel}>{h:02d}:00</option>')
+    hour_html = "".join(hour_options)
 
     body = f"""
       <div class="grid">
@@ -891,6 +989,7 @@ def settings():
                   <div class="muted">What gets deleted</div>
                 </div>
                 <div class="bd">
+
                   <div class="form">
                     <div class="field">
                       <label>Tag Label</label>
@@ -907,14 +1006,43 @@ def settings():
                              value="{cfg["DAYS_OLD"]}"
                              data-initial="{cfg["DAYS_OLD"]}">
                     </div>
+                  </div>
 
+                  <!-- Scheduler day/hour selector -->
+                  <div class="schedRow" style="margin-top:12px;">
                     <div class="field">
-                      <label>Cron Schedule</label>
-                      <input type="text"
-                             name="CRON_SCHEDULE"
-                             value="{cfg["CRON_SCHEDULE"]}"
-                             data-initial="{cfg["CRON_SCHEDULE"]}">
+                      <label>Scheduler Day</label>
+                      <select name="SCHED_DAY" data-initial="{day_key}">
+                        {day_opt("daily","Daily")}
+                        {day_opt("mon","Monday")}
+                        {day_opt("tue","Tuesday")}
+                        {day_opt("wed","Wednesday")}
+                        {day_opt("thu","Thursday")}
+                        {day_opt("fri","Friday")}
+                        {day_opt("sat","Saturday")}
+                        {day_opt("sun","Sunday")}
+                      </select>
                     </div>
+                    <div class="field">
+                      <label>Scheduler Time</label>
+                      <select name="SCHED_HOUR" data-initial="{hour_val}">
+                        {hour_html}
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- Hidden cron string derived from day/hour -->
+                  <input type="hidden"
+                         id="CRON_SCHEDULE"
+                         name="CRON_SCHEDULE"
+                         value="{cfg["CRON_SCHEDULE"]}"
+                         data-initial="{cfg["CRON_SCHEDULE"]}">
+
+                  <div class="muted" style="margin-top:10px;">
+                    Generated cron: <code id="cronPreview">{cfg["CRON_SCHEDULE"]}</code>
+                  </div>
+
+                  <div class="form" style="margin-top:12px;">
                     <div class="field">
                       <label>HTTP Timeout Seconds</label>
                       <input type="number"
@@ -994,6 +1122,43 @@ def settings():
         </div>
 
       </div>
+
+<script>
+  // Keep CRON_SCHEDULE in sync with Scheduler Day/Time selectors.
+  function buildCron(dayKey, hourStr) {
+    const h = parseInt(hourStr || "3", 10);
+    const hour = isNaN(h) ? 3 : Math.max(0, Math.min(23, h));
+    const dowMap = { daily:"*", sun:"0", mon:"1", tue:"2", wed:"3", thu:"4", fri:"5", sat:"6" };
+    const dow = dowMap[(dayKey || "daily").toLowerCase()] ?? "*";
+    return `15 ${hour} * * ${dow}`;
+  }
+
+  function syncCronFromSelectors() {
+    const daySel = document.querySelector('select[name="SCHED_DAY"]');
+    const hourSel = document.querySelector('select[name="SCHED_HOUR"]');
+    const cronInput = document.getElementById("CRON_SCHEDULE");
+    const cronPreview = document.getElementById("cronPreview");
+    if (!daySel || !hourSel || !cronInput) return;
+
+    const cron = buildCron(daySel.value, hourSel.value);
+    cronInput.value = cron;
+    if (cronPreview) cronPreview.textContent = cron;
+
+    // Trigger "dirty" logic
+    cronInput.dispatchEvent(new Event("input", { bubbles: true }));
+    cronInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const daySel = document.querySelector('select[name="SCHED_DAY"]');
+    const hourSel = document.querySelector('select[name="SCHED_HOUR"]');
+    if (daySel) daySel.addEventListener("change", syncCronFromSelectors);
+    if (hourSel) hourSel.addEventListener("change", syncCronFromSelectors);
+
+    // Ensure preview matches initial derived values
+    syncCronFromSelectors();
+  });
+</script>
     """
     return render_template_string(shell("mediareaparr • Settings", "settings", body))
 
@@ -1007,7 +1172,12 @@ def save():
     cfg["RADARR_API_KEY"] = request.form.get("RADARR_API_KEY") or ""
     cfg["TAG_LABEL"] = request.form.get("TAG_LABEL") or "autodelete30"
     cfg["DAYS_OLD"] = int(request.form.get("DAYS_OLD") or "30")
-    cfg["CRON_SCHEDULE"] = request.form.get("CRON_SCHEDULE") or "15 3 * * *"
+
+    # Day/hour selectors are converted into a cron string (minute fixed at 15)
+    sched_day = (request.form.get("SCHED_DAY") or "daily").lower()
+    sched_hour = _clamp_int(request.form.get("SCHED_HOUR") or 3, 0, 23, 3)
+    cfg["CRON_SCHEDULE"] = _day_hour_to_cron(sched_day, sched_hour)
+
     cfg["HTTP_TIMEOUT_SECONDS"] = int(request.form.get("HTTP_TIMEOUT_SECONDS") or "30")
     cfg["UI_THEME"] = (request.form.get("UI_THEME") or cfg.get("UI_THEME", "dark")).lower()
     if cfg["UI_THEME"] not in ("dark", "light"):
