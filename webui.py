@@ -205,7 +205,7 @@ def time_ago(dt_str: str) -> str:
 
 
 # --------------------------
-# Toast (popup) messages instead of flash banners
+# Toast (popup) messages (bottom-right)
 # --------------------------
 def render_toasts() -> str:
     msgs = get_flashed_messages(with_categories=True)
@@ -215,7 +215,6 @@ def render_toasts() -> str:
     items = []
     for cat, msg in msgs:
         t = "ok" if cat == "success" else "err"
-        # minimal escaping for safety
         safe = (msg or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         items.append(f'<div class="toast {t}">{safe}</div>')
 
@@ -260,7 +259,7 @@ BASE_HEAD = """
   }
 
   * { box-sizing: border-box; }
-  html { scroll-behavior: auto; } /* avoid animated jumps */
+  html { scroll-behavior: auto; }
   body{
     margin:0;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
@@ -535,7 +534,7 @@ BASE_HEAD = """
     opacity: 0;
     transform: translateY(10px);
     animation: toastIn .18s ease-out forwards, toastOut .25s ease-in forwards;
-    animation-delay: 0s, 15s;
+    animation-delay: 0s, 5s;
   }
   .toast.ok{ border-color: rgba(34,197,94,.55); }
   .toast.err{ border-color: rgba(239,68,68,.55); }
@@ -598,7 +597,6 @@ BASE_HEAD = """
     const settingsForm = document.getElementById("settingsForm");
     if (!settingsForm) return;
 
-    // If Radarr fields change: force re-test and reset the Test button label.
     if (e.target && (e.target.name === "RADARR_URL" || e.target.name === "RADARR_API_KEY")) {
       settingsForm.setAttribute("data-radarr-ok", "0");
 
@@ -613,11 +611,9 @@ BASE_HEAD = """
     updateSaveState();
   }
 
-  // IMPORTANT: listen to both (select + checkbox often use 'change')
   document.addEventListener("input", onSettingsEdited);
   document.addEventListener("change", onSettingsEdited);
 
-  // Preserve scroll position across reloads / redirects to stop jumping to top.
   (function () {
     const KEY = "agregarr_scroll_y";
     let t = null;
@@ -644,10 +640,10 @@ BASE_HEAD = """
         });
       }
 
-      // Auto-remove toast host after animations complete (16s)
+      // Auto-remove toast host after animations complete (~6s)
       const host = document.getElementById("toastHost");
       if (host) {
-        setTimeout(() => { try { host.remove(); } catch(e){} }, 16000);
+        setTimeout(() => { try { host.remove(); } catch(e){} }, 6000);
       }
     });
   })();
@@ -708,7 +704,6 @@ def shell(page_title: str, active: str, body: str):
     </div>
     """
 
-    # Toasts are included once per page render (bottom-right, auto fade in/out).
     toasts = render_toasts()
 
     return f"""
@@ -771,11 +766,9 @@ def toggle_theme():
 def test_radarr():
     cfg = load_config()
 
-    # Allow testing unsaved form values.
     url = (request.form.get("RADARR_URL") or cfg.get("RADARR_URL") or "").rstrip("/")
     api_key = request.form.get("RADARR_API_KEY") or cfg.get("RADARR_API_KEY") or ""
 
-    # Default to NOT OK unless we prove otherwise.
     cfg["RADARR_OK"] = False
     save_config(cfg)
 
@@ -798,7 +791,6 @@ def test_radarr():
 
         r.raise_for_status()
 
-        # Success: set RADARR_OK and return (no success flash).
         cfg["RADARR_OK"] = True
         save_config(cfg)
         return redirect("/settings")
@@ -840,14 +832,12 @@ def settings():
             </div>
           </div>
           <div class="bd">
-            <div class="muted">Saved to <code>/config/config.json</code>. Cron changes need <b>Apply Cron</b>.</div>
-            <div class="muted" style="margin-top:6px;">Logo: put <code>logo.png</code> (or jpg/svg) in <code>/config</code> or <code>/config/logo</code>.</div>
 
             <form id="settingsForm"
                   method="post"
                   action="/save"
                   data-radarr-ok="{ '1' if radarr_ok else '0' }"
-                  style="margin-top:14px;">
+                  style="margin-top:0px;">
 
               <!-- Radarr setup group -->
               <div class="card" style="box-shadow:none; margin-bottom:14px;">
@@ -1018,11 +1008,9 @@ def save():
     cfg["ADD_IMPORT_EXCLUSION"] = checkbox("ADD_IMPORT_EXCLUSION")
     cfg["RUN_ON_STARTUP"] = checkbox("RUN_ON_STARTUP")
 
-    # If Radarr creds changed, require retest.
     if old.get("RADARR_URL") != cfg["RADARR_URL"] or old.get("RADARR_API_KEY") != cfg["RADARR_API_KEY"]:
         cfg["RADARR_OK"] = False
 
-    # Enforce: cannot save unless Radarr OK (matches disabled UI).
     if not cfg.get("RADARR_OK", False):
         flash("Please click Test Connection and make sure it shows Connected before saving.", "error")
         return redirect("/settings")
@@ -1090,28 +1078,29 @@ def preview():
             """
 
         if error:
-            content = f'<div class="toast err" style="opacity:1; transform:none; animation:none;">{error}</div>'
-        else:
-            content = f"""
-              <div class="muted">Found <b>{len(candidates)}</b> candidate(s). Preview only (no deletes).</div>
-              <div class="muted" style="margin-top:6px;">Cutoff: <code>{cutoff}</code></div>
-              <div class="tablewrap" style="margin-top:12px;">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Age (days)</th>
-                      <th>Title</th>
-                      <th>Year</th>
-                      <th>Added</th>
-                      <th>ID</th>
-                      <th>Path</th>
-                    </tr>
-                  </thead>
-                  <tbody>{rows}</tbody>
-                </table>
-              </div>
-              <div class="muted" style="margin-top:10px;">Showing up to 500.</div>
-            """
+            flash(error, "error")
+            return redirect("/settings")
+
+        content = f"""
+          <div class="muted">Found <b>{len(candidates)}</b> candidate(s). Preview only (no deletes).</div>
+          <div class="muted" style="margin-top:6px;">Cutoff: <code>{cutoff}</code></div>
+          <div class="tablewrap" style="margin-top:12px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Age (days)</th>
+                  <th>Title</th>
+                  <th>Year</th>
+                  <th>Added</th>
+                  <th>ID</th>
+                  <th>Path</th>
+                </tr>
+              </thead>
+              <tbody>{rows}</tbody>
+            </table>
+          </div>
+          <div class="muted" style="margin-top:10px;">Showing up to 500.</div>
+        """
 
         body = f"""
           <div class="grid">
@@ -1140,7 +1129,6 @@ def preview():
 def dashboard():
     state = load_state()
     last_run = state.get("last_run")
-    history = state.get("run_history") or []
     cfg = load_config()
 
     run_now_btn = (
@@ -1243,17 +1231,6 @@ def dashboard():
       </div>
     """
     return render_template_string(shell("agregarr-cleanarr • Dashboard", "dash", body))
-
-
-@app.post("/clear-state")
-def clear_state():
-    try:
-        if STATE_PATH.exists():
-            STATE_PATH.unlink()
-        flash("State cleared ✔", "success")
-    except Exception as e:
-        flash(f"Failed to clear state: {e}", "error")
-    return redirect("/dashboard")
 
 
 @app.get("/status")
