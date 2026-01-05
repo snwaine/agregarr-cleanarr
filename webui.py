@@ -3,6 +3,7 @@ import json
 import signal
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Optional
 
 import requests
 from flask import (
@@ -89,7 +90,7 @@ def checkbox(name: str) -> bool:
 # --------------------------
 # Logo helpers
 # --------------------------
-def find_logo_path():
+def find_logo_path() -> Optional[Path]:
     for p in LOGO_CANDIDATES:
         if p.exists() and p.is_file():
             return p
@@ -520,13 +521,20 @@ BASE_HEAD = """
     if (e.key === "Escape") closeRunNowModal();
   });
 
-  // If Radarr fields change, disable Save until Test passes again.
+  // If Radarr fields change, disable Save until Test passes again
+  // and reset Test button label to "Test Connection".
   document.addEventListener("input", (e) => {
     if (e.target && (e.target.name === "RADARR_URL" || e.target.name === "RADARR_API_KEY")) {
       const saveBtn = document.getElementById("saveSettingsBtn");
       if (saveBtn) {
         saveBtn.disabled = true;
         saveBtn.title = "Test Radarr connection first";
+      }
+      const testBtn = document.getElementById("testRadarrBtn");
+      if (testBtn) {
+        testBtn.disabled = false;
+        testBtn.title = "Test Radarr connection";
+        testBtn.textContent = "Test Connection";
       }
     }
   });
@@ -680,17 +688,10 @@ def test_radarr():
             return redirect("/settings")
 
         r.raise_for_status()
-        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
 
-        version = data.get("version") or "unknown"
-        instance = data.get("instanceName") or ""
-        app_name = data.get("appName") or "Radarr"
-        extra = f" • instance: {instance}" if instance else ""
-
+        # Success: set RADARR_OK and return (no success flash).
         cfg["RADARR_OK"] = True
         save_config(cfg)
-
-        flash(f"✅ Connected to {app_name} (version {version}){extra}", "success")
         return redirect("/settings")
 
     except requests.exceptions.ConnectTimeout:
@@ -717,6 +718,10 @@ def settings():
     radarr_ok = bool(cfg.get("RADARR_OK"))
     save_disabled_attr = "disabled" if not radarr_ok else ""
     save_title = "Test Radarr connection first" if not radarr_ok else "Save settings"
+
+    test_label = "Connected" if radarr_ok else "Test Connection"
+    test_disabled_attr = "disabled" if radarr_ok else ""
+    test_title = "Radarr connection is OK" if radarr_ok else "Test Radarr connection"
 
     body = f"""
       <div class="grid">
@@ -754,7 +759,13 @@ def settings():
                   </div>
 
                   <div class="btnrow" style="margin-top:14px;">
-                    <button class="btn good" type="submit" formaction="/test-radarr" formmethod="post">✓</button>
+                    <button id="testRadarrBtn"
+                            class="btn good"
+                            type="submit"
+                            formaction="/test-radarr"
+                            formmethod="post"
+                            {test_disabled_attr}
+                            title="{test_title}">{test_label}</button>
                   </div>
                 </div>
               </div>
@@ -831,9 +842,11 @@ def settings():
               </div>
 
               <div class="btnrow" style="margin-top:14px;">
-                <button id="saveSettingsBtn" class="btn primary" type="submit" {save_disabled_attr} title="{save_title}">
-                  Save Settings
-                </button>
+                <button id="saveSettingsBtn"
+                        class="btn primary"
+                        type="submit"
+                        {save_disabled_attr}
+                        title="{save_title}">Save Settings</button>
                 <a class="btn" href="/preview" style="display:inline-flex; align-items:center;">Preview Candidates</a>
               </div>
             </form>
@@ -869,9 +882,9 @@ def save():
     if old.get("RADARR_URL") != cfg["RADARR_URL"] or old.get("RADARR_API_KEY") != cfg["RADARR_API_KEY"]:
         cfg["RADARR_OK"] = False
 
-    # Enforce: cannot save unless Radarr OK (matches disabled UI)
+    # Enforce: cannot save unless Radarr OK (matches disabled UI).
     if not cfg.get("RADARR_OK", False):
-        flash("Please click ✓ to Test Radarr connection before saving.", "error")
+        flash("Please click Test Connection and make sure it shows Connected before saving.", "error")
         return redirect("/settings")
 
     save_config(cfg)
