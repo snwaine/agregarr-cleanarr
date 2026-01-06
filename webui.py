@@ -710,8 +710,8 @@ BASE_HEAD = """
     setVal("job_name", "New Job");
     setVal("job_enabled", "1");
 
-    ensureSelectOption("job_tag", "autodelete30");
-    setVal("job_tag", "autodelete30");
+    // IMPORTANT: Tag starts EMPTY until user selects one
+    setVal("job_tag", "");
 
     setVal("job_days", "30");
     setVal("job_day", "daily");
@@ -734,7 +734,7 @@ BASE_HEAD = """
     setVal("job_name", btn.getAttribute("data-name") || "Job");
     setVal("job_enabled", (btn.getAttribute("data-enabled") || "1"));
 
-    const tag = btn.getAttribute("data-tag") || "autodelete30";
+    const tag = btn.getAttribute("data-tag") || "";
     ensureSelectOption("job_tag", tag);
     setVal("job_tag", tag);
 
@@ -851,7 +851,7 @@ BASE_HEAD = """
         const jid = params.get("job_id") || "";
         const name = params.get("name") || "New Job";
         const enabled = params.get("enabled") || "1";
-        const tag = params.get("TAG_LABEL") || "autodelete30";
+        const tag = params.get("TAG_LABEL") || "";
         const days = params.get("DAYS_OLD") || "30";
         const day = params.get("SCHED_DAY") || "daily";
         const hour = params.get("SCHED_HOUR") || "3";
@@ -866,7 +866,7 @@ BASE_HEAD = """
         setVal("job_name", decodeURIComponent(name));
         setVal("job_enabled", enabled);
 
-        const tagDecoded = decodeURIComponent(tag);
+        const tagDecoded = decodeURIComponent(tag || "");
         ensureSelectOption("job_tag", tagDecoded);
         setVal("job_tag", tagDecoded);
 
@@ -1154,11 +1154,8 @@ def jobs_page():
         except Exception:
             labels = []
 
-    # Always ensure at least one sensible option
-    if not labels:
-        labels = ["autodelete30"]
-
-    tag_opts = "".join(
+    # If no tags available, still show placeholder and let server validation catch it
+    tag_opts = '<option value="" selected disabled>-- Select a tag --</option>' + "".join(
         f'<option value="{safe_html(lbl)}">{safe_html(lbl)}</option>'
         for lbl in labels
     )
@@ -1255,7 +1252,6 @@ def jobs_page():
 
           <div class="mf">
             <button class="btn" type="button" onclick="hideModal('jobBack')">Cancel</button>
-            <!-- Save DOES NOT close modal; redirect will remove it -->
             <button class="btn primary" type="submit">Save Job</button>
           </div>
         </form>
@@ -1323,7 +1319,7 @@ def jobs_page():
             <div class="jobBody">
               <div class="btnrow">
                 <span class="tagPill {enabled_cls}">{enabled_text}</span>
-                <span class="tagPill">ID: <code>{safe_html(j["id"])}"></code></span>
+                <span class="tagPill">ID: <code>{safe_html(j["id"])}</code></span>
               </div>
 
               <div class="btnrow">
@@ -1341,7 +1337,8 @@ def jobs_page():
                         data-del="{ '1' if j["DELETE_FILES"] else '0' }"
                         data-excl="{ '1' if j["ADD_IMPORT_EXCLUSION"] else '0' }">Edit</button>
 
-                <form method="post" action="/jobs/delete" style="margin:0;" onsubmit="return confirm('Delete this job?');">
+                <form method="post" action="/jobs/delete" style="margin:0;"
+                      onsubmit="return confirm('Are you sure you want to delete this job?');">
                   <input type="hidden" name="job_id" value="{safe_html(j["id"])}">
                   <button class="btn bad" type="submit">Delete</button>
                 </form>
@@ -1385,11 +1382,15 @@ def jobs_save():
         name = (request.form.get("name") or "Job").strip()
         enabled = (request.form.get("enabled") or "1").strip() == "1"
 
+        tag_label = (request.form.get("TAG_LABEL") or "").strip()
+        if not tag_label:
+            raise ValueError("Please select a tag.")
+
         job = {
             "id": job_id or make_job_id(),
             "name": name,
             "enabled": enabled,
-            "TAG_LABEL": (request.form.get("TAG_LABEL") or "autodelete30").strip(),
+            "TAG_LABEL": tag_label,
             "DAYS_OLD": clamp_int(request.form.get("DAYS_OLD") or 30, 1, 36500, 30),
             "SCHED_DAY": (request.form.get("SCHED_DAY") or "daily").lower(),
             "SCHED_HOUR": clamp_int(request.form.get("SCHED_HOUR") or 3, 0, 23, 3),
@@ -1416,7 +1417,7 @@ def jobs_save():
         return redirect("/jobs")
 
     except Exception as e:
-        flash(f"Failed to save job: {e}", "error")
+        flash(str(e), "error")  # show clean error (e.g., "Please select a tag.")
         from urllib.parse import urlencode
 
         qs = urlencode({
