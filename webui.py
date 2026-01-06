@@ -85,6 +85,23 @@ def cron_from_day_hour(day_key: str, hour: int) -> str:
     return f"15 {hour} * * {dow}"
 
 
+def schedule_label(day_key: str, hour: int) -> str:
+    day_key = (day_key or "daily").lower()
+    names = {
+        "daily": "Daily",
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday",
+    }
+    day_txt = names.get(day_key, "Daily")
+    h = clamp_int(hour, 0, 23, 3)
+    return f"{day_txt} • {h:02d}:00"
+
+
 def job_defaults() -> Dict[str, Any]:
     return {
         "id": make_job_id(),
@@ -502,21 +519,18 @@ BASE_HEAD = """
     background-size: 6px 6px, 6px 6px;
     background-repeat: no-repeat;
   }
-  [data-theme="light"] .field select{
-    background: rgba(0,0,0,.02);
-  }
+  [data-theme="light"] .field select{ background: rgba(0,0,0,.02); }
 
-  /* The open dropdown list (options) */
   body[data-theme="dark"] .field select option{
-    background-color: #0f1620; /* matches --panel */
-    color: #e6edf3;           /* matches --text */
+    background-color: #0f1620;
+    color: #e6edf3;
   }
   body[data-theme="light"] .field select option{
     background-color: #ffffff;
     color: #0b1220;
   }
   body[data-theme="dark"] .field select option:checked{
-    background-color: #1f2a36; /* matches --line */
+    background-color: #1f2a36;
     color: #e6edf3;
   }
 
@@ -596,7 +610,7 @@ BASE_HEAD = """
     width: min(720px, 100%);
     border: 1px solid var(--line);
     border-radius: 16px;
-    background: var(--panel); /* OPAQUE modal */
+    background: var(--panel);
     box-shadow: var(--shadow);
     overflow:hidden;
   }
@@ -655,7 +669,6 @@ BASE_HEAD = """
 </style>
 
 <script>
-  // ---------- Modal helpers ----------
   function showModal(id) {
     const back = document.getElementById(id);
     if (back) back.style.display = "flex";
@@ -665,9 +678,9 @@ BASE_HEAD = """
     if (back) back.style.display = "none";
   }
 
-  // IMPORTANT: Job modal should only close via Cancel/Save (page redirect), so:
+  // Job modal should only close via Cancel/Save redirect:
   // - no ESC close for jobBack
-  // - no backdrop click close (we don't attach onclick to jobBack)
+  // - no backdrop click close
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       hideModal("runNowBack"); // only this one
@@ -683,7 +696,7 @@ BASE_HEAD = """
     if (el) el.checked = !!v;
   }
 
-  // Ensure a select contains an option (useful if a job has a tag that's not currently in Radarr)
+  // Ensure a select contains an option (job tag missing in Radarr)
   function ensureSelectOption(selectId, value) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
@@ -700,7 +713,6 @@ BASE_HEAD = """
     sel.insertBefore(opt, sel.firstChild);
   }
 
-  // ---------- Job modal ----------
   function openNewJob() {
     const form = document.getElementById("jobForm");
     if (!form) return;
@@ -750,7 +762,6 @@ BASE_HEAD = """
     showModal("jobBack");
   }
 
-  // ---------- Run Now confirm ----------
   function openRunNowConfirm(jobId) {
     const hid = document.getElementById("runNowJobId");
     if (hid) hid.value = jobId || "";
@@ -1154,17 +1165,14 @@ def jobs_page():
         except Exception:
             labels = []
 
-    # If no tags available, still show placeholder and let server validation catch it
     tag_opts = '<option value="" selected disabled>-- Select a tag --</option>' + "".join(
         f'<option value="{safe_html(lbl)}">{safe_html(lbl)}</option>'
         for lbl in labels
     )
 
-    # Job modal HTML
     hour_opts = "".join([f'<option value="{h}">{h:02d}:00</option>' for h in range(0, 24)])
 
     job_modal = f"""
-    <!-- Job modal: no backdrop click close, no ESC close, no X close -->
     <div class="modalBack" id="jobBack">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="jobTitle">
         <div class="mh">
@@ -1282,7 +1290,7 @@ def jobs_page():
 
     job_cards = []
     for j in cfg["JOBS"]:
-        cron = cron_from_day_hour(j["SCHED_DAY"], j["SCHED_HOUR"])
+        sched = schedule_label(j["SCHED_DAY"], j["SCHED_HOUR"])
         enabled_cls = "ok" if j["enabled"] else "off"
         enabled_text = "Enabled" if j["enabled"] else "Disabled"
         dry = "on" if j["DRY_RUN"] else "OFF"
@@ -1307,7 +1315,7 @@ def jobs_page():
                 <div class="jobName">{safe_html(j["name"])}</div>
                 <div class="jobMeta">
                   Tag: <code>{safe_html(j["TAG_LABEL"])}</code> • Older than <code>{j["DAYS_OLD"]}</code> days<br>
-                  Schedule: <code>{safe_html(cron)}</code> • Dry-run: <b>{dry}</b> • Delete files: <b>{delete_files}</b>
+                  Schedule: <b>{safe_html(sched)}</b> • Dry-run: <b>{dry}</b> • Delete files: <b>{delete_files}</b>
                 </div>
               </div>
               <div class="btnrow">
@@ -1417,7 +1425,7 @@ def jobs_save():
         return redirect("/jobs")
 
     except Exception as e:
-        flash(str(e), "error")  # show clean error (e.g., "Please select a tag.")
+        flash(str(e), "error")
         from urllib.parse import urlencode
 
         qs = urlencode({
