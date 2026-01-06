@@ -1044,11 +1044,46 @@ BASE_HEAD = """
     showModal("jobBack");
   }
 
-  function openRunNowConfirm(jobId) {
+  // ✅ Dynamic Run Now confirmation
+  function openRunNowConfirm(jobId, opts) {
+    opts = opts || {};
+    const app = (opts.app || "radarr").toLowerCase();
+    const dryRun = !!opts.dryRun;
+    const deleteFiles = !!opts.deleteFiles;
+    const enabled = (opts.enabled === undefined) ? true : !!opts.enabled;
+
     const hid = document.getElementById("runNowJobId");
     if (hid) hid.value = jobId || "";
+
+    const elApp = document.getElementById("rn_app");
+    const elDry = document.getElementById("rn_dry");
+    const elDel = document.getElementById("rn_del");
+    const elEnabled = document.getElementById("rn_enabled");
+
+    if (elApp) elApp.textContent = (app === "sonarr") ? "Sonarr" : "Radarr";
+    if (elDry) elDry.textContent = dryRun ? "ON" : "OFF";
+    if (elDel) elDel.textContent = deleteFiles ? "ON" : "OFF";
+    if (elEnabled) elEnabled.textContent = enabled ? "Enabled" : "Disabled";
+
+    const msg = document.getElementById("rn_msg");
+    if (msg) {
+      const parts = [];
+      if (!enabled) parts.push("This job is currently disabled — running now will still execute it.");
+      if (!dryRun) parts.push("Dry Run is OFF — this will perform real actions.");
+      if (deleteFiles) parts.push("Delete Files is ON — files may be removed from disk.");
+      else parts.push("Delete Files is OFF — it should avoid disk deletes.");
+
+      msg.textContent = parts.join(" ");
+    }
+
+    const hintDelete = document.getElementById("rn_hint_delete");
+    const hintNoDelete = document.getElementById("rn_hint_no_delete");
+    if (hintDelete) hintDelete.style.display = deleteFiles ? "" : "none";
+    if (hintNoDelete) hintNoDelete.style.display = deleteFiles ? "none" : "";
+
     showModal("runNowBack");
   }
+
   function runNowSubmitConfirm() {
     const form = document.getElementById("runNowFormConfirm");
     if (form) form.submit();
@@ -1186,7 +1221,6 @@ BASE_HEAD = """
 
       showModal("jobBack");
     } else {
-      // Ensure correct initial visibility if modal opened manually
       const appSel = document.getElementById("job_app");
       const appKey = appSel ? (appSel.value || "radarr") : "radarr";
       updateSonarrModeVisibility(appKey);
@@ -1798,6 +1832,7 @@ def jobs_page():
     </div>
     """
 
+    # ✅ Dynamic modal content placeholders
     run_confirm_modal = """
     <div class="modalBack" id="runNowBack">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="runNowTitle">
@@ -1805,8 +1840,21 @@ def jobs_page():
           <h3 id="runNowTitle">Run Now confirmation</h3>
         </div>
         <div class="mb">
-          <p><b>Dry Run is OFF.</b> This job will perform real actions.</p>
-          <p class="muted">If <b>Delete Files</b> is enabled, it may delete files via Radarr/Sonarr.</p>
+          <div style="margin-bottom:10px;">
+            <div class="muted">App: <b><span id="rn_app">Radarr</span></b></div>
+            <div class="muted">Dry Run: <b><span id="rn_dry">OFF</span></b> • Delete Files: <b><span id="rn_del">ON</span></b> • Job: <b><span id="rn_enabled">Enabled</span></b></div>
+          </div>
+
+          <p><b id="rn_msg">Dry Run is OFF — this will perform real actions.</b></p>
+
+          <p id="rn_hint_delete" class="muted">
+            With <b>Delete Files</b> enabled, it may delete files from disk via the app.
+          </p>
+
+          <p id="rn_hint_no_delete" class="muted" style="display:none;">
+            With <b>Delete Files</b> disabled, it should avoid deleting from disk.
+          </p>
+
           <p class="muted">If you’re not sure, edit the job and enable <b>Dry Run</b>, then use Preview.</p>
         </div>
         <div class="mf">
@@ -1844,7 +1892,13 @@ def jobs_page():
             """
         else:
             run_now_html = f"""
-              <button class="btn bad" type="button" onclick="openRunNowConfirm('{safe_html(j["id"])}')">Run Now</button>
+              <button class="btn bad" type="button"
+                onclick="openRunNowConfirm('{safe_html(j["id"])}', {{
+                  app: '{safe_html(app_key)}',
+                  dryRun: false,
+                  deleteFiles: {str(bool(j["DELETE_FILES"])).lower()},
+                  enabled: {str(bool(j["enabled"])).lower()}
+                }})">Run Now</button>
             """
 
         job_cards.append(f"""
@@ -2134,16 +2188,36 @@ def preview():
             """
         else:
             run_now_html = f"""
-              <button class="btn bad" type="button" onclick="openRunNowConfirm('{safe_html(job["id"])}')">Run Now</button>
+              <button class="btn bad" type="button"
+                onclick="openRunNowConfirm('{safe_html(job["id"])}', {{
+                  app: '{safe_html(job.get("APP","radarr"))}',
+                  dryRun: false,
+                  deleteFiles: {str(bool(job.get("DELETE_FILES", True))).lower()},
+                  enabled: {str(bool(job.get("enabled", True))).lower()}
+                }})">Run Now</button>
             """
 
+        # ✅ Same dynamic modal as Jobs page
         run_confirm_modal = """
         <div class="modalBack" id="runNowBack">
           <div class="modal" role="dialog" aria-modal="true" aria-labelledby="runNowTitle">
             <div class="mh"><h3 id="runNowTitle">Run Now confirmation</h3></div>
             <div class="mb">
-              <p><b>Dry Run is OFF.</b> This job will perform real actions.</p>
-              <p class="muted">If <b>Delete Files</b> is enabled, it may delete files via Radarr/Sonarr.</p>
+              <div style="margin-bottom:10px;">
+                <div class="muted">App: <b><span id="rn_app">Radarr</span></b></div>
+                <div class="muted">Dry Run: <b><span id="rn_dry">OFF</span></b> • Delete Files: <b><span id="rn_del">ON</span></b> • Job: <b><span id="rn_enabled">Enabled</span></b></div>
+              </div>
+
+              <p><b id="rn_msg">Dry Run is OFF — this will perform real actions.</b></p>
+
+              <p id="rn_hint_delete" class="muted">
+                With <b>Delete Files</b> enabled, it may delete files from disk via the app.
+              </p>
+
+              <p id="rn_hint_no_delete" class="muted" style="display:none;">
+                With <b>Delete Files</b> disabled, it should avoid deleting from disk.
+              </p>
+
               <p class="muted">If you’re not sure, edit the job and enable <b>Dry Run</b>, then use Preview.</p>
             </div>
             <div class="mf">
