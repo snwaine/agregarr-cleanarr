@@ -335,14 +335,20 @@ BASE_HEAD = """
   }
 
   * { box-sizing: border-box; }
+
+  /* ✅ Make gradient always fill the viewport */
+  html, body { height: 100%; }
   html { scroll-behavior: auto; }
+
   body{
+    min-height: 100vh;
     margin:0;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
     background:
       radial-gradient(1200px 700px at 20% 0%, rgba(34,197,94,.18), transparent 60%),
       radial-gradient(900px 600px at 100% 10%, rgba(34,197,94,.10), transparent 55%),
       var(--bg);
+    background-attachment: fixed;
     color: var(--text);
   }
 
@@ -696,7 +702,6 @@ BASE_HEAD = """
     if (el) el.checked = !!v;
   }
 
-  // Ensure a select contains an option (job tag missing in Radarr)
   function ensureSelectOption(selectId, value) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
@@ -721,10 +726,7 @@ BASE_HEAD = """
     setVal("job_id", "");
     setVal("job_name", "New Job");
     setVal("job_enabled", "1");
-
-    // IMPORTANT: Tag starts EMPTY until user selects one
     setVal("job_tag", "");
-
     setVal("job_days", "30");
     setVal("job_day", "daily");
     setVal("job_hour", "3");
@@ -772,7 +774,6 @@ BASE_HEAD = """
     if (form) form.submit();
   }
 
-  // ---------- Dirty + Save Settings logic ----------
   function isDirty(settingsForm) {
     if (!settingsForm) return false;
     const els = settingsForm.querySelectorAll("input, select, textarea");
@@ -824,7 +825,6 @@ BASE_HEAD = """
   document.addEventListener("input", onSettingsEdited);
   document.addEventListener("change", onSettingsEdited);
 
-  // ---------- Scroll restore + toast cleanup ----------
   (function () {
     const KEY = "mediareaparr_scroll_y";
     let t = null;
@@ -856,7 +856,6 @@ BASE_HEAD = """
         setTimeout(() => { try { host.remove(); } catch(e){} }, 6000);
       }
 
-      // Re-open Job modal on demand (e.g., save error)
       const params = new URLSearchParams(window.location.search);
       if (params.get("modal") === "job") {
         const jid = params.get("job_id") || "";
@@ -1153,7 +1152,6 @@ def save_settings():
 def jobs_page():
     cfg = load_config()
 
-    # Fetch Radarr tags for Tag Label dropdown
     labels = []
     if cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY"):
         try:
