@@ -3,7 +3,7 @@ import json
 import signal
 import uuid
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 
 import requests
@@ -31,7 +31,7 @@ LOGO_CANDIDATES = [
 ]
 
 app = Flask(__name__)
-app.secret_key = "mediareaparr-secret"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "mediareaparr-secret")
 
 
 # --------------------------
@@ -107,6 +107,7 @@ def job_defaults() -> Dict[str, Any]:
         "id": make_job_id(),
         "name": "New Job",
         "enabled": True,
+        "APP": "radarr",  # radarr | sonarr
         "TAG_LABEL": "",
         "DAYS_OLD": 30,
         "SCHED_DAY": "daily",
@@ -123,6 +124,10 @@ def normalize_job(j: Dict[str, Any]) -> Dict[str, Any]:
     d["id"] = str(d.get("id") or make_job_id())
     d["name"] = str(d.get("name") or "Job").strip()[:60] or "Job"
     d["enabled"] = bool(d.get("enabled", True))
+
+    d["APP"] = str(d.get("APP") or "radarr").lower()
+    if d["APP"] not in ("radarr", "sonarr"):
+        d["APP"] = "radarr"
 
     d["TAG_LABEL"] = str(d.get("TAG_LABEL") or "").strip()
     d["DAYS_OLD"] = clamp_int(d.get("DAYS_OLD", 30), 1, 36500, 30)
@@ -242,16 +247,52 @@ def radarr_get(cfg: Dict[str, Any], path: str):
     return r.json()
 
 
-def parse_radarr_date(s: str):
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    dt = datetime.fromisoformat(s)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+# --------------------------
+# Sonarr helpers
+# --------------------------
+def sonarr_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
+    return {"X-Api-Key": cfg.get("SONARR_API_KEY", "")}
 
 
-def preview_candidates(cfg: Dict[str, Any], job: Dict[str, Any]):
+def sonarr_get(cfg: Dict[str, Any], path: str):
+    url = cfg["SONARR_URL"].rstrip("/") + path
+    r = requests.get(url, headers=sonarr_headers(cfg), timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)))
+    r.raise_for_status()
+    return r.json()
+
+
+def parse_iso_date(s: str):
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def get_tag_labels(cfg: Dict[str, Any], app_key: str):
+    app_key = (app_key or "").lower()
+    if app_key == "radarr":
+        if not (cfg.get("RADARR_ENABLED", True) and cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK")):
+            return []
+        tags = radarr_get(cfg, "/api/v3/tag")
+    elif app_key == "sonarr":
+        if not (cfg.get("SONARR_ENABLED", False) and cfg.get("SONARR_URL") and cfg.get("SONARR_API_KEY") and cfg.get("SONARR_OK")):
+            return []
+        tags = sonarr_get(cfg, "/api/v3/tag")
+    else:
+        return []
+
+    labels = sorted({t.get("label") for t in (tags or []) if t.get("label")}, key=lambda x: str(x).lower())
+    return labels
+
+
+def preview_candidates_radarr(cfg: Dict[str, Any], job: Dict[str, Any]):
     if not cfg.get("RADARR_ENABLED", True):
         return {"error": "Radarr is disabled in Settings.", "candidates": [], "cutoff": ""}
 
@@ -261,7 +302,7 @@ def preview_candidates(cfg: Dict[str, Any], job: Dict[str, Any]):
 
     days_old = int(job.get("DAYS_OLD", 30))
     now = datetime.now(timezone.utc)
-    cutoff = now - __import__("datetime").timedelta(days=days_old)
+    cutoff = now - timedelta(days=days_old)
 
     tags = radarr_get(cfg, "/api/v3/tag")
     tag = next((t for t in tags if t.get("label") == tag_label), None)
@@ -276,18 +317,63 @@ def preview_candidates(cfg: Dict[str, Any], job: Dict[str, Any]):
         if tag_id not in (m.get("tags") or []):
             continue
         added_str = m.get("added")
-        if not added_str:
+        added = parse_iso_date(added_str) if added_str else None
+        if not added:
             continue
-        added = parse_radarr_date(added_str).astimezone(timezone.utc)
         if added < cutoff:
             age_days = int((now - added).total_seconds() // 86400)
             candidates.append({
+                "kind": "movie",
                 "id": m.get("id"),
                 "title": m.get("title"),
                 "year": m.get("year"),
                 "added": added_str,
                 "age_days": age_days,
                 "path": m.get("path"),
+            })
+
+    candidates.sort(key=lambda x: x["age_days"], reverse=True)
+    return {"error": None, "candidates": candidates, "tag_id": tag_id, "cutoff": cutoff.isoformat()}
+
+
+def preview_candidates_sonarr(cfg: Dict[str, Any], job: Dict[str, Any]):
+    if not cfg.get("SONARR_ENABLED", False):
+        return {"error": "Sonarr is disabled in Settings.", "candidates": [], "cutoff": ""}
+
+    tag_label = (job.get("TAG_LABEL") or "").strip()
+    if not tag_label:
+        return {"error": "Tag is empty. Edit the job and select a tag.", "candidates": [], "cutoff": ""}
+
+    days_old = int(job.get("DAYS_OLD", 30))
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days_old)
+
+    tags = sonarr_get(cfg, "/api/v3/tag")
+    tag = next((t for t in tags if t.get("label") == tag_label), None)
+    if not tag:
+        return {"error": f"Tag '{tag_label}' not found in Sonarr.", "candidates": [], "cutoff": cutoff.isoformat()}
+
+    tag_id = tag["id"]
+    series_list = sonarr_get(cfg, "/api/v3/series")
+
+    candidates = []
+    for s in series_list:
+        if tag_id not in (s.get("tags") or []):
+            continue
+        added_str = s.get("added")
+        added = parse_iso_date(added_str) if added_str else None
+        if not added:
+            continue
+        if added < cutoff:
+            age_days = int((now - added).total_seconds() // 86400)
+            candidates.append({
+                "kind": "series",
+                "id": s.get("id"),
+                "title": s.get("title"),
+                "year": s.get("year"),
+                "added": added_str,
+                "age_days": age_days,
+                "path": s.get("path"),
             })
 
     candidates.sort(key=lambda x: x["age_days"], reverse=True)
@@ -395,7 +481,7 @@ BASE_HEAD = """
   .logoWrap{
     width: 38px; height: 38px; border-radius: 12px;
     border: 1px solid var(--line2);
-    background: rgba(255,255,255,.04);
+    background: var(--panel2);
     overflow:hidden;
     display:flex; align-items:center; justify-content:center;
   }
@@ -409,7 +495,7 @@ BASE_HEAD = """
     height: 100%;
     object-fit: contain;
     display:block;
-    background: rgba(0,0,0,.08);
+    background: var(--panel2);
   }
 
   .title h1{ margin:0; font-size: 16px; letter-spacing:.2px; }
@@ -418,7 +504,7 @@ BASE_HEAD = """
   .nav{ display:flex; align-items:center; gap:8px; flex-wrap: wrap; justify-content: flex-end; }
   .pill{
     border: 1px solid var(--line2);
-    background: rgba(255,255,255,.03);
+    background: var(--panel2);
     padding: 8px 11px;
     border-radius: 999px;
     font-size: 13px;
@@ -436,7 +522,7 @@ BASE_HEAD = """
     grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
-    background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
+    background: var(--panel);
     box-shadow: var(--shadow);
     overflow:hidden;
   }
@@ -445,15 +531,15 @@ BASE_HEAD = """
     border-bottom: 1px solid var(--line);
     display:flex; align-items:center; justify-content: space-between;
     gap:12px;
-    background: rgba(0,0,0,.10);
+    background: var(--panel2);
   }
-  [data-theme="light"] .card .hd{ background: rgba(255,255,255,.55); }
+  [data-theme="light"] .card .hd{ background: #f3f4f6; }
   .card .hd h2{ margin:0; font-size: 14px; letter-spacing:.2px; }
-  .card .bd{ padding: 14px 16px; }
+  .card .bd{ padding: 14px 16px; background: var(--panel); }
 
   .muted{ color: var(--muted); }
   code{
-    background: rgba(255,255,255,.08);
+    background: var(--panel2);
     border: 1px solid var(--line2);
     padding: 2px 7px;
     border-radius: 10px;
@@ -466,7 +552,7 @@ BASE_HEAD = """
   .btnrow{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
   .btn{
     border: 1px solid var(--line2);
-    background: rgba(255,255,255,.03);
+    background: var(--panel2);
     color: var(--text);
     padding: 10px 12px;
     border-radius: 12px;
@@ -500,34 +586,37 @@ BASE_HEAD = """
   .form{ display:grid; grid-template-columns: 1fr; gap: 12px; }
   @media(min-width: 900px){ .form{ grid-template-columns: 1fr 1fr; } }
 
+  /* OPAQUE fields/menus */
   .field{
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 10px 12px;
-    background: rgba(0,0,0,.14);
+    background: var(--panel2);
     position: relative;
   }
-  [data-theme="light"] .field{ background: rgba(0,0,0,.03); }
+  [data-theme="light"] .field{ background: var(--panel); }
 
   .field label{ display:block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
 
   .field input[type=text], .field input[type=password], .field input[type=number], .field select{
     width: 100%;
     border: 1px solid var(--line2);
-    background: rgba(255,255,255,.05);
+    background: var(--panel);
     color: var(--text);
     padding: 10px 10px;
     border-radius: 12px;
     outline: none;
   }
-  [data-theme="light"] .field input, [data-theme="light"] .field select{ background: rgba(0,0,0,.02); }
+  [data-theme="light"] .field input, [data-theme="light"] .field select{
+    background: #ffffff;
+  }
 
   .field select{
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
 
-    background: rgba(255,255,255,.06);
+    background: var(--panel);
     padding-right: 36px;
     cursor: pointer;
 
@@ -540,7 +629,7 @@ BASE_HEAD = """
     background-size: 6px 6px, 6px 6px;
     background-repeat: no-repeat;
   }
-  [data-theme="light"] .field select{ background: rgba(0,0,0,.02); }
+  [data-theme="light"] .field select{ background: #ffffff; }
 
   body[data-theme="dark"] .field select option{
     background-color: #1f2937;
@@ -562,9 +651,9 @@ BASE_HEAD = """
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 10px 12px;
-    background: rgba(0,0,0,.14);
+    background: var(--panel2);
   }
-  [data-theme="light"] .check{ background: rgba(0,0,0,.03); }
+  [data-theme="light"] .check{ background: #ffffff; }
   .check input{ transform: scale(1.2); }
 
   /* Toggle switch */
@@ -576,10 +665,10 @@ BASE_HEAD = """
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 10px 12px;
-    background: rgba(0,0,0,.12);
+    background: var(--panel2);
     margin-bottom: 12px;
   }
-  [data-theme="light"] .toggleRow{ background: rgba(0,0,0,.02); }
+  [data-theme="light"] .toggleRow{ background: #ffffff; }
 
   .switch{
     position: relative;
@@ -637,10 +726,10 @@ BASE_HEAD = """
     grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
-    background: rgba(0,0,0,.10);
+    background: var(--panel2);
     overflow:hidden;
   }
-  [data-theme="light"] .jobCard{ background: rgba(0,0,0,.02); }
+  [data-theme="light"] .jobCard{ background: #ffffff; }
   .jobTop{
     padding: 12px 12px;
     border-bottom: 1px solid var(--line);
@@ -648,33 +737,36 @@ BASE_HEAD = """
     align-items:flex-start;
     justify-content: space-between;
     gap: 12px;
+    background: var(--panel2);
   }
+  [data-theme="light"] .jobTop{ background: #f3f4f6; }
   .jobName{ font-weight: 800; letter-spacing:.2px; }
   .jobMeta{ margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.35; }
-  .jobBody{ padding: 12px 12px; display:flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items:center; }
+  .jobBody{ padding: 12px 12px; display:flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items:center; background: var(--panel2); }
+  [data-theme="light"] .jobBody{ background: #ffffff; }
   .tagPill{
     border: 1px solid var(--line2);
     border-radius: 999px;
     padding: 6px 10px;
     font-size: 12px;
     color: var(--text);
-    background: rgba(255,255,255,.03);
+    background: var(--panel);
   }
   .tagPill.ok { border-color: rgba(34,197,94,.45); }
   .tagPill.off { opacity: .6; }
 
-  table{ width:100%; border-collapse: collapse; overflow:hidden; border-radius: 14px; border: 1px solid var(--line); }
+  table{ width:100%; border-collapse: collapse; overflow:hidden; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); }
   th, td{ padding: 10px 10px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
   th{
     text-align:left;
     color:#e5e7eb;
-    background: rgba(255,255,255,.05);
+    background: var(--panel2);
     position: sticky;
     top: 0;
   }
-  [data-theme="light"] th{ color:#111827; background: rgba(0,0,0,.03); }
-  tr:hover td{ background: rgba(255,255,255,.02); }
-  .tablewrap{ max-height: 420px; overflow:auto; border-radius: 14px; border: 1px solid var(--line); }
+  [data-theme="light"] th{ color:#111827; background: #f3f4f6; }
+  tr:hover td{ background: rgba(255,255,255,.03); }
+  .tablewrap{ max-height: 420px; overflow:auto; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); }
 
   /* Modal */
   .modalBack{
@@ -702,20 +794,20 @@ BASE_HEAD = """
     align-items:center;
     justify-content: space-between;
     gap: 12px;
-    background: rgba(0,0,0,.12);
+    background: var(--panel2);
   }
-  [data-theme="light"] .modal .mh{ background: rgba(0,0,0,.03); }
+  [data-theme="light"] .modal .mh{ background: #f3f4f6; }
   .modal .mh h3{ margin:0; font-size: 14px; letter-spacing: .2px; }
-  .modal .mb{ padding: 14px 16px; }
+  .modal .mb{ padding: 14px 16px; background: var(--panel); }
   .modal .mf{
     padding: 14px 16px;
     border-top: 1px solid var(--line);
     display:flex;
     justify-content: flex-end;
     gap: 10px;
-    background: rgba(0,0,0,.10);
+    background: var(--panel2);
   }
-  [data-theme="light"] .modal .mf{ background: rgba(0,0,0,.02); }
+  [data-theme="light"] .modal .mf{ background: #f3f4f6; }
 
   /* Toasts */
   .toastHost{
@@ -732,7 +824,7 @@ BASE_HEAD = """
   .toast{
     pointer-events: auto;
     border: 1px solid var(--line2);
-    background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.035));
+    background: var(--panel);
     box-shadow: var(--shadow);
     border-radius: 14px;
     padding: 12px 12px;
@@ -762,6 +854,7 @@ BASE_HEAD = """
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       hideModal("runNowBack");
+      hideModal("jobBack");
     }
   });
 
@@ -786,8 +879,37 @@ BASE_HEAD = """
 
     const opt = document.createElement("option");
     opt.value = v;
-    opt.textContent = v + " (missing in Radarr)";
+    opt.textContent = v + " (missing)";
     sel.insertBefore(opt, sel.firstChild);
+  }
+
+  function rebuildTagOptions(appKey, selectedValue) {
+    const sel = document.getElementById("job_tag");
+    if (!sel) return;
+
+    const tags = (window.__TAGS && window.__TAGS[appKey]) ? window.__TAGS[appKey] : [];
+    const base = ['<option value="" selected disabled>-- Select a tag --</option>'];
+
+    for (const t of tags) {
+      const esc = (t || "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;");
+      base.push(`<option value="${esc}">${esc}</option>`);
+    }
+
+    sel.innerHTML = base.join("");
+    if (selectedValue) {
+      ensureSelectOption("job_tag", selectedValue);
+      setVal("job_tag", selectedValue);
+    }
+  }
+
+  function onJobAppChanged() {
+    const appSel = document.getElementById("job_app");
+    const appKey = appSel ? (appSel.value || "radarr") : "radarr";
+    rebuildTagOptions(appKey, "");
   }
 
   function openNewJob() {
@@ -798,7 +920,12 @@ BASE_HEAD = """
     setVal("job_id", "");
     setVal("job_name", "New Job");
     setVal("job_enabled", "1");
-    setVal("job_tag", "");
+
+    const appSel = document.getElementById("job_app");
+    const defApp = appSel?.getAttribute("data-default-app") || "radarr";
+    setVal("job_app", defApp);
+    rebuildTagOptions(defApp, "");
+
     setVal("job_days", "30");
     setVal("job_day", "daily");
     setVal("job_hour", "3");
@@ -820,9 +947,11 @@ BASE_HEAD = """
     setVal("job_name", btn.getAttribute("data-name") || "Job");
     setVal("job_enabled", (btn.getAttribute("data-enabled") || "1"));
 
+    const appKey = btn.getAttribute("data-app") || "radarr";
+    setVal("job_app", appKey);
+
     const tag = btn.getAttribute("data-tag") || "";
-    ensureSelectOption("job_tag", tag);
-    setVal("job_tag", tag);
+    rebuildTagOptions(appKey, tag);
 
     setVal("job_days", btn.getAttribute("data-days") || "30");
     setVal("job_day", btn.getAttribute("data-day") || "daily");
@@ -912,7 +1041,6 @@ BASE_HEAD = """
       }
     }
 
-    // Toggle visuals for sections
     const radSec = document.getElementById("radarrSection");
     const sonSec = document.getElementById("sonarrSection");
     const radEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
@@ -928,7 +1056,6 @@ BASE_HEAD = """
   document.addEventListener("change", onSettingsEdited);
 
   document.addEventListener("DOMContentLoaded", () => {
-    // initial disabled sections state
     const radSec = document.getElementById("radarrSection");
     const sonSec = document.getElementById("sonarrSection");
     const radEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
@@ -946,6 +1073,7 @@ BASE_HEAD = """
       const jid = params.get("job_id") || "";
       const name = params.get("name") || "New Job";
       const enabled = params.get("enabled") || "1";
+      const appKey = (params.get("APP") || "radarr");
       const tag = params.get("TAG_LABEL") || "";
       const days = params.get("DAYS_OLD") || "30";
       const day = params.get("SCHED_DAY") || "daily";
@@ -960,10 +1088,10 @@ BASE_HEAD = """
       setVal("job_id", jid);
       setVal("job_name", decodeURIComponent(name));
       setVal("job_enabled", enabled);
+      setVal("job_app", appKey);
 
       const tagDecoded = decodeURIComponent(tag || "");
-      ensureSelectOption("job_tag", tagDecoded);
-      setVal("job_tag", tagDecoded);
+      rebuildTagOptions(appKey, tagDecoded);
 
       setVal("job_days", days);
       setVal("job_day", day);
@@ -1027,7 +1155,7 @@ def shell(page_title: str, active: str, body: str):
         {logo_html}
         <div class="title">
           <h1>mediareaparr</h1>
-          <div class="sub">Radarr tag + age cleanup • multi-job scheduler • WebUI</div>
+          <div class="sub">Radarr/Sonarr tag + age cleanup • multi-job scheduler • WebUI</div>
         </div>
       </div>
       <div class="nav">{nav}</div>
@@ -1373,7 +1501,6 @@ def save_settings():
     old = load_config()
     cfg = load_config()
 
-    # toggles
     cfg["RADARR_ENABLED"] = checkbox("RADARR_ENABLED")
     cfg["SONARR_ENABLED"] = checkbox("SONARR_ENABLED")
 
@@ -1392,7 +1519,6 @@ def save_settings():
     if old.get("SONARR_URL") != cfg["SONARR_URL"] or old.get("SONARR_API_KEY") != cfg["SONARR_API_KEY"]:
         cfg["SONARR_OK"] = False
 
-    # Validation respecting toggles
     if cfg.get("RADARR_ENABLED", True):
         if not cfg.get("RADARR_OK", False):
             flash("Radarr enabled: click Test Connection and make sure it shows Connected before saving.", "error")
@@ -1419,20 +1545,46 @@ def save_settings():
 def jobs_page():
     cfg = load_config()
 
-    labels = []
-    if cfg.get("RADARR_ENABLED", True) and cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK"):
-        try:
-            tags = radarr_get(cfg, "/api/v3/tag")
-            labels = sorted({t.get("label") for t in (tags or []) if t.get("label")}, key=lambda x: str(x).lower())
-        except Exception:
-            labels = []
+    radarr_labels = []
+    sonarr_labels = []
+    try:
+        radarr_labels = get_tag_labels(cfg, "radarr")
+    except Exception:
+        radarr_labels = []
+    try:
+        sonarr_labels = get_tag_labels(cfg, "sonarr")
+    except Exception:
+        sonarr_labels = []
 
-    tag_opts = '<option value="" selected disabled>-- Select a tag --</option>' + "".join(
-        f'<option value="{safe_html(lbl)}">{safe_html(lbl)}</option>'
-        for lbl in labels
-    )
+    available_apps = []
+    if radarr_labels:
+        available_apps.append("radarr")
+    if sonarr_labels:
+        available_apps.append("sonarr")
+
+    # Default app selection in modal:
+    # - If only one is available, preselect and disable dropdown
+    # - Else prefer radarr if available
+    default_app = "radarr"
+    if len(available_apps) == 1:
+        default_app = available_apps[0]
+    elif "radarr" in available_apps:
+        default_app = "radarr"
+    elif "sonarr" in available_apps:
+        default_app = "sonarr"
+
+    app_disabled_attr = "disabled" if len(available_apps) == 1 else ""
 
     hour_opts = "".join([f'<option value="{h}">{h:02d}:00</option>' for h in range(0, 24)])
+
+    tags_js = f"""
+    <script>
+      window.__TAGS = {{
+        radarr: {json.dumps(radarr_labels)},
+        sonarr: {json.dumps(sonarr_labels)},
+      }};
+    </script>
+    """
 
     job_modal = f"""
     <div class="modalBack" id="jobBack">
@@ -1446,6 +1598,15 @@ def jobs_page():
             <input type="hidden" name="job_id" id="job_id" value="">
 
             <div class="form">
+              <div class="field">
+                <label>App</label>
+                <select name="APP" id="job_app" onchange="onJobAppChanged()"
+                        data-default-app="{safe_html(default_app)}" {app_disabled_attr}>
+                  <option value="radarr">Radarr</option>
+                  <option value="sonarr">Sonarr</option>
+                </select>
+              </div>
+
               <div class="field">
                 <label>Job Name</label>
                 <input type="text" name="name" id="job_name" value="New Job" required>
@@ -1462,7 +1623,7 @@ def jobs_page():
               <div class="field">
                 <label>Tag Label</label>
                 <select name="TAG_LABEL" id="job_tag" required>
-                  {tag_opts}
+                  <option value="" selected disabled>-- Select a tag --</option>
                 </select>
               </div>
 
@@ -1506,7 +1667,7 @@ def jobs_page():
                 <input type="checkbox" id="job_delete" name="DELETE_FILES" checked>
                 <div>
                   <div style="font-weight:700;">Delete Files</div>
-                  <div class="muted">Remove movie files from disk.</div>
+                  <div class="muted">Remove files from disk.</div>
                 </div>
               </label>
 
@@ -1514,7 +1675,7 @@ def jobs_page():
                 <input type="checkbox" id="job_excl" name="ADD_IMPORT_EXCLUSION">
                 <div>
                   <div style="font-weight:700;">Add Import Exclusion</div>
-                  <div class="muted">Prevents Radarr re-import.</div>
+                  <div class="muted">Prevents re-import.</div>
                 </div>
               </label>
             </div>
@@ -1536,7 +1697,8 @@ def jobs_page():
           <h3 id="runNowTitle">Run Now confirmation</h3>
         </div>
         <div class="mb">
-          <p><b>Dry Run is OFF.</b> This job may delete movie files via Radarr.</p>
+          <p><b>Dry Run is OFF.</b> This job will perform real actions.</p>
+          <p class="muted">If <b>Delete Files</b> is enabled, it may delete files via Radarr/Sonarr.</p>
           <p class="muted">If you’re not sure, edit the job and enable <b>Dry Run</b>, then use Preview.</p>
         </div>
         <div class="mf">
@@ -1552,11 +1714,14 @@ def jobs_page():
 
     job_cards = []
     for j in cfg["JOBS"]:
+        j = normalize_job(j)
         sched = schedule_label(j["SCHED_DAY"], j["SCHED_HOUR"])
         enabled_cls = "ok" if j["enabled"] else "off"
         enabled_text = "Enabled" if j["enabled"] else "Disabled"
         dry = "on" if j["DRY_RUN"] else "OFF"
         delete_files = "on" if j["DELETE_FILES"] else "off"
+        app_key = (j.get("APP") or "radarr").lower()
+        app_label = "Radarr" if app_key == "radarr" else "Sonarr"
 
         if j["DRY_RUN"]:
             run_now_html = f"""
@@ -1576,7 +1741,7 @@ def jobs_page():
               <div>
                 <div class="jobName">{safe_html(j["name"])}</div>
                 <div class="jobMeta">
-                  Tag: <code>{safe_html(j["TAG_LABEL"])}</code> • Older than <code>{j["DAYS_OLD"]}</code> days<br>
+                  App: <b>{safe_html(app_label)}</b> • Tag: <code>{safe_html(j["TAG_LABEL"])}</code> • Older than <code>{j["DAYS_OLD"]}</code> days<br>
                   Schedule: <b>{safe_html(sched)}</b> • Dry-run: <b>{dry}</b> • Delete files: <b>{delete_files}</b>
                 </div>
               </div>
@@ -1599,6 +1764,7 @@ def jobs_page():
                         data-id="{safe_html(j["id"])}"
                         data-name="{safe_html(j["name"])}"
                         data-enabled="{ '1' if j["enabled"] else '0' }"
+                        data-app="{safe_html(app_key)}"
                         data-tag="{safe_html(j["TAG_LABEL"])}"
                         data-days="{j["DAYS_OLD"]}"
                         data-day="{safe_html(j["SCHED_DAY"])}"
@@ -1618,6 +1784,8 @@ def jobs_page():
         """)
 
     body = f"""
+      {tags_js}
+
       <div class="grid">
         <div class="card">
           <div class="hd">
@@ -1633,6 +1801,9 @@ def jobs_page():
           <div class="bd">
             <div class="jobsGrid">
               {''.join(job_cards)}
+            </div>
+            <div class="muted" style="margin-top:12px;">
+              Tip: If only one app is connected, the App selector is auto-selected.
             </div>
           </div>
         </div>
@@ -1652,6 +1823,18 @@ def jobs_save():
         name = (request.form.get("name") or "Job").strip()
         enabled = (request.form.get("enabled") or "1").strip() == "1"
 
+        app_key = (request.form.get("APP") or "radarr").strip().lower()
+        if app_key not in ("radarr", "sonarr"):
+            raise ValueError("Invalid app selection.")
+
+        # Ensure chosen app is actually connected/enabled
+        if app_key == "radarr":
+            if not (cfg.get("RADARR_ENABLED", True) and cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK")):
+                raise ValueError("Radarr is not connected/enabled. Go to Settings and connect Radarr (or pick Sonarr).")
+        else:
+            if not (cfg.get("SONARR_ENABLED", False) and cfg.get("SONARR_URL") and cfg.get("SONARR_API_KEY") and cfg.get("SONARR_OK")):
+                raise ValueError("Sonarr is not connected/enabled. Go to Settings and connect Sonarr (or pick Radarr).")
+
         tag_label = (request.form.get("TAG_LABEL") or "").strip()
         if not tag_label:
             raise ValueError("Please select a tag.")
@@ -1660,6 +1843,7 @@ def jobs_save():
             "id": job_id or make_job_id(),
             "name": name,
             "enabled": enabled,
+            "APP": app_key,
             "TAG_LABEL": tag_label,
             "DAYS_OLD": clamp_int(request.form.get("DAYS_OLD") or 30, 1, 36500, 30),
             "SCHED_DAY": (request.form.get("SCHED_DAY") or "daily").lower(),
@@ -1692,6 +1876,7 @@ def jobs_save():
         qs = urlencode({
             "modal": "job",
             "job_id": request.form.get("job_id", ""),
+            "APP": request.form.get("APP", "radarr"),
             "name": request.form.get("name", ""),
             "enabled": request.form.get("enabled", "1"),
             "TAG_LABEL": request.form.get("TAG_LABEL", ""),
@@ -1774,7 +1959,11 @@ def preview():
         job = normalize_job((cfg.get("JOBS") or [job_defaults()])[0])
 
     try:
-        result = preview_candidates(cfg, job)
+        if job.get("APP") == "sonarr":
+            result = preview_candidates_sonarr(cfg, job)
+        else:
+            result = preview_candidates_radarr(cfg, job)
+
         error = result.get("error")
         candidates = result.get("candidates", [])
         cutoff = result.get("cutoff", "")
@@ -1813,7 +2002,8 @@ def preview():
           <div class="modal" role="dialog" aria-modal="true" aria-labelledby="runNowTitle">
             <div class="mh"><h3 id="runNowTitle">Run Now confirmation</h3></div>
             <div class="mb">
-              <p><b>Dry Run is OFF.</b> This job may delete movie files via Radarr.</p>
+              <p><b>Dry Run is OFF.</b> This job will perform real actions.</p>
+              <p class="muted">If <b>Delete Files</b> is enabled, it may delete files via Radarr/Sonarr.</p>
               <p class="muted">If you’re not sure, edit the job and enable <b>Dry Run</b>, then use Preview.</p>
             </div>
             <div class="mf">
@@ -1827,6 +2017,8 @@ def preview():
         </div>
         """
 
+        app_label = "Sonarr" if job.get("APP") == "sonarr" else "Radarr"
+
         body = f"""
           <div class="grid">
             <div class="card">
@@ -1839,7 +2031,7 @@ def preview():
               </div>
               <div class="bd">
                 <div class="muted">
-                  Job: <b>{safe_html(job["name"])}</b> • Tag <code>{safe_html(job["TAG_LABEL"])}</code> • Older than <code>{job["DAYS_OLD"]}</code> days
+                  App: <b>{safe_html(app_label)}</b> • Job: <b>{safe_html(job["name"])}</b> • Tag <code>{safe_html(job["TAG_LABEL"])}</code> • Older than <code>{job["DAYS_OLD"]}</code> days
                 </div>
                 <div class="muted" style="margin-top:6px;">Found <b>{len(candidates)}</b> candidate(s). Preview only (no deletes).</div>
                 <div class="muted" style="margin-top:6px;">Cutoff: <code>{safe_html(cutoff)}</code></div>
@@ -1929,6 +2121,9 @@ def status():
         for k, v in d.items():
             if k == "JOBS":
                 rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>[{len(v or [])} jobs]</td></tr>")
+            elif "API_KEY" in str(k).upper():
+                # Don't leak keys in status page
+                rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>***</td></tr>")
             else:
                 rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>{safe_html(str(v))}</td></tr>")
         return "".join(rows)

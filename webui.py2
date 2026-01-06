@@ -107,7 +107,7 @@ def job_defaults() -> Dict[str, Any]:
         "id": make_job_id(),
         "name": "New Job",
         "enabled": True,
-        "TAG_LABEL": "autodelete30",
+        "TAG_LABEL": "",
         "DAYS_OLD": 30,
         "SCHED_DAY": "daily",
         "SCHED_HOUR": 3,
@@ -145,8 +145,12 @@ def load_config() -> Dict[str, Any]:
     cfg = {
         "RADARR_URL": env_default("RADARR_URL", "http://radarr:7878").rstrip("/"),
         "RADARR_API_KEY": env_default("RADARR_API_KEY", ""),
+        "RADARR_ENABLED": True,
+
         "SONARR_URL": env_default("SONARR_URL", "").rstrip("/"),
         "SONARR_API_KEY": env_default("SONARR_API_KEY", ""),
+        "SONARR_ENABLED": False,
+
         "HTTP_TIMEOUT_SECONDS": int(env_default("HTTP_TIMEOUT_SECONDS", "30")),
         "UI_THEME": env_default("UI_THEME", "dark"),
         "RADARR_OK": False,
@@ -167,6 +171,8 @@ def load_config() -> Dict[str, Any]:
     cfg["UI_THEME"] = t if t in ("dark", "light") else "dark"
     cfg["RADARR_OK"] = bool(cfg.get("RADARR_OK", False))
     cfg["SONARR_OK"] = bool(cfg.get("SONARR_OK", False))
+    cfg["RADARR_ENABLED"] = bool(cfg.get("RADARR_ENABLED", True))
+    cfg["SONARR_ENABLED"] = bool(cfg.get("SONARR_ENABLED", False))
     cfg["HTTP_TIMEOUT_SECONDS"] = clamp_int(cfg.get("HTTP_TIMEOUT_SECONDS", 30), 5, 300, 30)
 
     jobs = cfg.get("JOBS") or []
@@ -177,8 +183,6 @@ def load_config() -> Dict[str, Any]:
     if not jobs:
         j = job_defaults()
         j["name"] = "Default Job"
-        # default tag should be empty until user selects, but keep existing behavior if you like:
-        j["TAG_LABEL"] = ""
         jobs = [normalize_job(j)]
 
     cfg["JOBS"] = jobs
@@ -248,6 +252,9 @@ def parse_radarr_date(s: str):
 
 
 def preview_candidates(cfg: Dict[str, Any], job: Dict[str, Any]):
+    if not cfg.get("RADARR_ENABLED", True):
+        return {"error": "Radarr is disabled in Settings.", "candidates": [], "cutoff": ""}
+
     tag_label = (job.get("TAG_LABEL") or "").strip()
     if not tag_label:
         return {"error": "Tag is empty. Edit the job and select a tag.", "candidates": [], "cutoff": ""}
@@ -311,20 +318,21 @@ BASE_HEAD = """
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root{
-    --bg:#0b0f14;
-    --panel:#0f1620;
-    --panel2:#0c121b;
-    --muted:#9aa7b2;
-    --text:#e6edf3;
-    --line:#1f2a36;
-    --line2:#283241;
+    /* Lighter dark theme */
+    --bg:#111827;
+    --panel:#1f2937;
+    --panel2:#1b2431;
+    --muted:#9ca3af;
+    --text:#f1f5f9;
+    --line:#334155;
+    --line2:#475569;
 
     --accent:#22c55e;
     --accent2:#16a34a;
 
     --warn:#f59e0b;
     --bad:#ef4444;
-    --shadow: 0 12px 30px rgba(0,0,0,.35);
+    --shadow: 0 12px 28px rgba(0,0,0,.28);
   }
 
   [data-theme="light"]{
@@ -351,9 +359,12 @@ BASE_HEAD = """
     min-height: 100vh;
     margin:0;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    /* Green gradient that matches the logo */
     background:
-      radial-gradient(1200px 700px at 20% 0%, rgba(34,197,94,.18), transparent 60%),
-      radial-gradient(900px 600px at 100% 10%, rgba(34,197,94,.10), transparent 55%),
+      radial-gradient(900px 520px at 18% 8%, rgba(34,197,94,.22), transparent 62%),
+      radial-gradient(880px 520px at 92% 10%, rgba(22,163,74,.16), transparent 60%),
+      radial-gradient(700px 460px at 50% 105%, rgba(34,197,94,.10), transparent 60%),
+      linear-gradient(135deg, rgba(34,197,94,.10), rgba(22,163,74,.06)),
       var(--bg);
     background-attachment: fixed;
     color: var(--text);
@@ -373,7 +384,7 @@ BASE_HEAD = """
     padding: 14px 16px;
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+    background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
     box-shadow: var(--shadow);
     position: sticky;
     top: 14px;
@@ -384,14 +395,14 @@ BASE_HEAD = """
   .logoWrap{
     width: 38px; height: 38px; border-radius: 12px;
     border: 1px solid var(--line2);
-    background: rgba(255,255,255,.03);
+    background: rgba(255,255,255,.04);
     overflow:hidden;
     display:flex; align-items:center; justify-content:center;
   }
   .logoBadge{
     width: 38px; height: 38px; border-radius: 12px;
     background: linear-gradient(135deg, rgba(34,197,94,.92), rgba(22,163,74,.65));
-    box-shadow: 0 10px 24px rgba(34,197,94,.20);
+    box-shadow: 0 10px 24px rgba(34,197,94,.18);
   }
   .logoImg{
     width: 100%;
@@ -415,8 +426,8 @@ BASE_HEAD = """
     color: var(--text);
   }
   .pill.active{
-    border-color: rgba(34,197,94,.65);
-    box-shadow: 0 0 0 3px rgba(34,197,94,.18);
+    border-color: rgba(34,197,94,.55);
+    box-shadow: 0 0 0 3px rgba(34,197,94,.16);
   }
 
   .grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 14px; margin-top: 16px; }
@@ -425,7 +436,7 @@ BASE_HEAD = """
     grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
-    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+    background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
     box-shadow: var(--shadow);
     overflow:hidden;
   }
@@ -434,7 +445,7 @@ BASE_HEAD = """
     border-bottom: 1px solid var(--line);
     display:flex; align-items:center; justify-content: space-between;
     gap:12px;
-    background: rgba(0,0,0,.12);
+    background: rgba(0,0,0,.10);
   }
   [data-theme="light"] .card .hd{ background: rgba(255,255,255,.55); }
   .card .hd h2{ margin:0; font-size: 14px; letter-spacing:.2px; }
@@ -442,7 +453,7 @@ BASE_HEAD = """
 
   .muted{ color: var(--muted); }
   code{
-    background: rgba(255,255,255,.06);
+    background: rgba(255,255,255,.08);
     border: 1px solid var(--line2);
     padding: 2px 7px;
     border-radius: 10px;
@@ -463,19 +474,19 @@ BASE_HEAD = """
     font-weight: 600;
     font-size: 13px;
   }
-  .btn:hover{ border-color: rgba(34,197,94,.55); }
+  .btn:hover{ border-color: rgba(34,197,94,.45); }
   .btn:disabled{
     opacity: .45;
     cursor: not-allowed;
     filter: grayscale(0.35);
   }
   .btn.primary{
-    border-color: rgba(34,197,94,.55);
-    background: linear-gradient(135deg, rgba(34,197,94,.28), rgba(34,197,94,.10));
+    border-color: rgba(34,197,94,.45);
+    background: linear-gradient(135deg, rgba(34,197,94,.26), rgba(34,197,94,.10));
   }
   .btn.good{
-    border-color: rgba(34,197,94,.55);
-    background: linear-gradient(135deg, rgba(34,197,94,.22), rgba(34,197,94,.08));
+    border-color: rgba(34,197,94,.45);
+    background: linear-gradient(135deg, rgba(34,197,94,.20), rgba(34,197,94,.08));
   }
   .btn.warn{
     border-color: rgba(245,158,11,.55);
@@ -493,7 +504,7 @@ BASE_HEAD = """
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 10px 12px;
-    background: rgba(0,0,0,.18);
+    background: rgba(0,0,0,.14);
     position: relative;
   }
   [data-theme="light"] .field{ background: rgba(0,0,0,.03); }
@@ -503,7 +514,7 @@ BASE_HEAD = """
   .field input[type=text], .field input[type=password], .field input[type=number], .field select{
     width: 100%;
     border: 1px solid var(--line2);
-    background: rgba(255,255,255,.04);
+    background: rgba(255,255,255,.05);
     color: var(--text);
     padding: 10px 10px;
     border-radius: 12px;
@@ -511,7 +522,6 @@ BASE_HEAD = """
   }
   [data-theme="light"] .field input, [data-theme="light"] .field select{ background: rgba(0,0,0,.02); }
 
-  /* Dropdown fixes */
   .field select{
     appearance: none;
     -webkit-appearance: none;
@@ -533,8 +543,8 @@ BASE_HEAD = """
   [data-theme="light"] .field select{ background: rgba(0,0,0,.02); }
 
   body[data-theme="dark"] .field select option{
-    background-color: #0f1620;
-    color: #e6edf3;
+    background-color: #1f2937;
+    color: #f1f5f9;
   }
   body[data-theme="light"] .field select option{
     background-color: #ffffff;
@@ -542,8 +552,8 @@ BASE_HEAD = """
   }
 
   .field input:focus, .field select:focus{
-    border-color: rgba(34,197,94,.65);
-    box-shadow: 0 0 0 3px rgba(34,197,94,.15);
+    border-color: rgba(34,197,94,.55);
+    box-shadow: 0 0 0 3px rgba(34,197,94,.14);
   }
 
   .checks{ display:flex; flex-direction: column; gap: 10px; margin-top: 4px; }
@@ -552,10 +562,74 @@ BASE_HEAD = """
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 10px 12px;
-    background: rgba(0,0,0,.18);
+    background: rgba(0,0,0,.14);
   }
   [data-theme="light"] .check{ background: rgba(0,0,0,.03); }
   .check input{ transform: scale(1.2); }
+
+  /* Toggle switch */
+  .toggleRow{
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: rgba(0,0,0,.12);
+    margin-bottom: 12px;
+  }
+  [data-theme="light"] .toggleRow{ background: rgba(0,0,0,.02); }
+
+  .switch{
+    position: relative;
+    width: 52px;
+    height: 30px;
+    display: inline-block;
+    flex: 0 0 auto;
+  }
+  .switch input{
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .slider{
+    position:absolute;
+    cursor:pointer;
+    inset:0;
+    background: rgba(255,255,255,.10);
+    border: 1px solid var(--line2);
+    transition: .18s ease;
+    border-radius: 999px;
+  }
+  .slider:before{
+    position:absolute;
+    content:"";
+    height: 22px;
+    width: 22px;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255,255,255,.85);
+    border-radius: 999px;
+    transition: .18s ease;
+    box-shadow: 0 6px 14px rgba(0,0,0,.25);
+  }
+  .switch input:checked + .slider{
+    background: linear-gradient(135deg, rgba(34,197,94,.60), rgba(22,163,74,.35));
+    border-color: rgba(34,197,94,.55);
+  }
+  .switch input:checked + .slider:before{
+    transform: translate(22px, -50%);
+    background: rgba(255,255,255,.92);
+  }
+
+  /* Disabled section look */
+  .disabledSection{
+    opacity: .55;
+    filter: grayscale(.12);
+    pointer-events: none;
+  }
 
   /* Jobs cards */
   .jobsGrid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
@@ -563,7 +637,7 @@ BASE_HEAD = """
     grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
-    background: rgba(0,0,0,.12);
+    background: rgba(0,0,0,.10);
     overflow:hidden;
   }
   [data-theme="light"] .jobCard{ background: rgba(0,0,0,.02); }
@@ -586,15 +660,15 @@ BASE_HEAD = """
     color: var(--text);
     background: rgba(255,255,255,.03);
   }
-  .tagPill.ok { border-color: rgba(34,197,94,.55); }
+  .tagPill.ok { border-color: rgba(34,197,94,.45); }
   .tagPill.off { opacity: .6; }
 
   table{ width:100%; border-collapse: collapse; overflow:hidden; border-radius: 14px; border: 1px solid var(--line); }
   th, td{ padding: 10px 10px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
   th{
     text-align:left;
-    color:#cbd5e1;
-    background: rgba(255,255,255,.04);
+    color:#e5e7eb;
+    background: rgba(255,255,255,.05);
     position: sticky;
     top: 0;
   }
@@ -605,7 +679,7 @@ BASE_HEAD = """
   /* Modal */
   .modalBack{
     position: fixed; inset: 0;
-    background: rgba(0,0,0,.72);
+    background: rgba(0,0,0,.68);
     backdrop-filter: blur(6px);
     display:none;
     align-items:center;
@@ -628,7 +702,7 @@ BASE_HEAD = """
     align-items:center;
     justify-content: space-between;
     gap: 12px;
-    background: rgba(0,0,0,.18);
+    background: rgba(0,0,0,.12);
   }
   [data-theme="light"] .modal .mh{ background: rgba(0,0,0,.03); }
   .modal .mh h3{ margin:0; font-size: 14px; letter-spacing: .2px; }
@@ -639,7 +713,7 @@ BASE_HEAD = """
     display:flex;
     justify-content: flex-end;
     gap: 10px;
-    background: rgba(0,0,0,.14);
+    background: rgba(0,0,0,.10);
   }
   [data-theme="light"] .modal .mf{ background: rgba(0,0,0,.02); }
 
@@ -658,7 +732,7 @@ BASE_HEAD = """
   .toast{
     pointer-events: auto;
     border: 1px solid var(--line2);
-    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+    background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.035));
     box-shadow: var(--shadow);
     border-radius: 14px;
     padding: 12px 12px;
@@ -669,14 +743,13 @@ BASE_HEAD = """
     animation: toastIn .18s ease-out forwards, toastOut .25s ease-in forwards;
     animation-delay: 0s, 5s;
   }
-  .toast.ok{ border-color: rgba(34,197,94,.55); }
+  .toast.ok{ border-color: rgba(34,197,94,.45); }
   .toast.err{ border-color: rgba(239,68,68,.55); }
   @keyframes toastIn { to { opacity: 1; transform: translateY(0); } }
   @keyframes toastOut { to { opacity: 0; transform: translateY(10px); } }
 </style>
 
 <script>
-  // ---------- Modal helpers ----------
   function showModal(id) {
     const back = document.getElementById(id);
     if (back) back.style.display = "flex";
@@ -686,10 +759,9 @@ BASE_HEAD = """
     if (back) back.style.display = "none";
   }
 
-  // Job modal should only close via Cancel/Save redirect:
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      hideModal("runNowBack"); // only this one
+      hideModal("runNowBack");
     }
   });
 
@@ -702,7 +774,6 @@ BASE_HEAD = """
     if (el) el.checked = !!v;
   }
 
-  // Ensure job tag select can show a value even if it's not in Radarr anymore
   function ensureSelectOption(selectId, value) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
@@ -719,7 +790,6 @@ BASE_HEAD = """
     sel.insertBefore(opt, sel.firstChild);
   }
 
-  // ---------- Job modal ----------
   function openNewJob() {
     const form = document.getElementById("jobForm");
     if (!form) return;
@@ -728,10 +798,7 @@ BASE_HEAD = """
     setVal("job_id", "");
     setVal("job_name", "New Job");
     setVal("job_enabled", "1");
-
-    // tag starts empty until user picks
     setVal("job_tag", "");
-
     setVal("job_days", "30");
     setVal("job_day", "daily");
     setVal("job_hour", "3");
@@ -769,7 +836,6 @@ BASE_HEAD = """
     showModal("jobBack");
   }
 
-  // ---------- Run Now confirm ----------
   function openRunNowConfirm(jobId) {
     const hid = document.getElementById("runNowJobId");
     if (hid) hid.value = jobId || "";
@@ -780,7 +846,6 @@ BASE_HEAD = """
     if (form) form.submit();
   }
 
-  // ---------- Settings: dirty + save gating ----------
   function isDirty(settingsForm) {
     if (!settingsForm) return false;
     const els = settingsForm.querySelectorAll("input, select, textarea");
@@ -806,14 +871,20 @@ BASE_HEAD = """
     const sonarrOk = settingsForm.getAttribute("data-sonarr-ok") === "1";
     const dirty = isDirty(settingsForm);
 
+    const radarrEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
+    const sonarrEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+
     const sonarrUrl = (document.querySelector('input[name="SONARR_URL"]')?.value || "").trim();
     const sonarrKey = (document.querySelector('input[name="SONARR_API_KEY"]')?.value || "").trim();
     const sonarrConfigured = !!(sonarrUrl || sonarrKey);
-    const sonarrReady = !sonarrConfigured || sonarrOk;
 
-    saveBtn.disabled = !(radarrOk && sonarrReady && dirty);
-    if (!radarrOk) saveBtn.title = "Test Radarr connection first";
-    else if (!sonarrReady) saveBtn.title = "Test Sonarr connection first (or clear Sonarr fields)";
+    const radarrReady = !radarrEnabled || radarrOk;
+    const sonarrReady = !sonarrEnabled || (!sonarrConfigured) || sonarrOk;
+
+    saveBtn.disabled = !(radarrReady && sonarrReady && dirty);
+
+    if (!radarrReady) saveBtn.title = "Radarr enabled: test connection first (or disable Radarr)";
+    else if (!sonarrReady) saveBtn.title = "Sonarr enabled: test connection first (or disable Sonarr / clear fields)";
     else saveBtn.title = dirty ? "Save settings" : "No changes to save";
   }
 
@@ -841,14 +912,30 @@ BASE_HEAD = """
       }
     }
 
+    // Toggle visuals for sections
+    const radSec = document.getElementById("radarrSection");
+    const sonSec = document.getElementById("sonarrSection");
+    const radEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
+    const sonEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+
+    if (radSec) radSec.classList.toggle("disabledSection", !radEnabled);
+    if (sonSec) sonSec.classList.toggle("disabledSection", !sonEnabled);
+
     updateSaveState();
   }
 
   document.addEventListener("input", onSettingsEdited);
   document.addEventListener("change", onSettingsEdited);
 
-  // ---------- Reopen job modal after server-side validation errors ----------
   document.addEventListener("DOMContentLoaded", () => {
+    // initial disabled sections state
+    const radSec = document.getElementById("radarrSection");
+    const sonSec = document.getElementById("sonarrSection");
+    const radEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
+    const sonEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+    if (radSec) radSec.classList.toggle("disabledSection", !radEnabled);
+    if (sonSec) sonSec.classList.toggle("disabledSection", !sonEnabled);
+
     updateSaveState();
 
     const host = document.getElementById("toastHost");
@@ -981,13 +1068,13 @@ def toggle_theme():
     return redirect(request.referrer or "/dashboard")
 
 
-# -------- Reset buttons --------
 @app.post("/reset-radarr")
 def reset_radarr():
     cfg = load_config()
     cfg["RADARR_URL"] = ""
     cfg["RADARR_API_KEY"] = ""
     cfg["RADARR_OK"] = False
+    cfg["RADARR_ENABLED"] = False
     save_config(cfg)
     flash("Radarr settings cleared ✔", "success")
     return redirect("/settings")
@@ -999,12 +1086,12 @@ def reset_sonarr():
     cfg["SONARR_URL"] = ""
     cfg["SONARR_API_KEY"] = ""
     cfg["SONARR_OK"] = False
+    cfg["SONARR_ENABLED"] = False
     save_config(cfg)
     flash("Sonarr settings cleared ✔", "success")
     return redirect("/settings")
 
 
-# -------- Test connections (save values on success) --------
 @app.post("/test-radarr")
 def test_radarr():
     cfg = load_config()
@@ -1037,6 +1124,7 @@ def test_radarr():
         cfg["RADARR_URL"] = url
         cfg["RADARR_API_KEY"] = api_key
         cfg["RADARR_OK"] = True
+        cfg["RADARR_ENABLED"] = True
         save_config(cfg)
 
         flash("Radarr connected ✔", "success")
@@ -1084,6 +1172,7 @@ def test_sonarr():
         cfg["SONARR_URL"] = url
         cfg["SONARR_API_KEY"] = api_key
         cfg["SONARR_OK"] = True
+        cfg["SONARR_ENABLED"] = True
         save_config(cfg)
 
         flash("Sonarr connected ✔", "success")
@@ -1105,6 +1194,8 @@ def settings():
 
     radarr_ok = bool(cfg.get("RADARR_OK"))
     sonarr_ok = bool(cfg.get("SONARR_OK"))
+    radarr_enabled = bool(cfg.get("RADARR_ENABLED", True))
+    sonarr_enabled = bool(cfg.get("SONARR_ENABLED", False))
 
     test_label = "Connected" if radarr_ok else "Test Connection"
     test_disabled_attr = "disabled" if radarr_ok else ""
@@ -1138,35 +1229,49 @@ def settings():
               <div class="card" style="box-shadow:none; margin-bottom:14px;">
                 <div class="hd"><h2>Radarr setup</h2></div>
                 <div class="bd">
-                  <div class="form">
-                    <div class="field">
-                      <label>Radarr URL</label>
-                      <input type="text" name="RADARR_URL"
-                             value="{safe_html(cfg["RADARR_URL"])}"
-                             data-initial="{safe_html(cfg["RADARR_URL"])}">
+
+                  <div class="toggleRow">
+                    <div>
+                      <div style="font-weight:800;">Enable Radarr</div>
+                      <div class="muted">Turn off to ignore Radarr features.</div>
                     </div>
-                    <div class="field">
-                      <label>Radarr API Key</label>
-                      <input type="password" name="RADARR_API_KEY"
-                             value="{safe_html(cfg["RADARR_API_KEY"])}"
-                             data-initial="{safe_html(cfg["RADARR_API_KEY"])}">
-                    </div>
+                    <label class="switch" title="Enable/Disable Radarr">
+                      <input id="radarr_enabled" name="RADARR_ENABLED" type="checkbox" {"checked" if radarr_enabled else ""}>
+                      <span class="slider"></span>
+                    </label>
                   </div>
 
-                  <div class="btnrow" style="margin-top:14px;">
-                    <button id="testRadarrBtn"
-                            class="btn good"
-                            type="submit"
-                            formaction="/test-radarr"
-                            formmethod="post"
-                            {test_disabled_attr}
-                            title="{safe_html(test_title)}">{safe_html(test_label)}</button>
+                  <div id="radarrSection">
+                    <div class="form">
+                      <div class="field">
+                        <label>Radarr URL</label>
+                        <input type="text" name="RADARR_URL"
+                               value="{safe_html(cfg["RADARR_URL"])}"
+                               data-initial="{safe_html(cfg["RADARR_URL"])}">
+                      </div>
+                      <div class="field">
+                        <label>Radarr API Key</label>
+                        <input type="password" name="RADARR_API_KEY"
+                               value="{safe_html(cfg["RADARR_API_KEY"])}"
+                               data-initial="{safe_html(cfg["RADARR_API_KEY"])}">
+                      </div>
+                    </div>
 
-                    <button class="btn bad"
-                            type="submit"
-                            formaction="/reset-radarr"
-                            formmethod="post"
-                            onclick="return confirm('Clear Radarr URL/API key?');">Reset Radarr</button>
+                    <div class="btnrow" style="margin-top:14px;">
+                      <button id="testRadarrBtn"
+                              class="btn good"
+                              type="submit"
+                              formaction="/test-radarr"
+                              formmethod="post"
+                              {test_disabled_attr}
+                              title="{safe_html(test_title)}">{safe_html(test_label)}</button>
+
+                      <button class="btn bad"
+                              type="submit"
+                              formaction="/reset-radarr"
+                              formmethod="post"
+                              onclick="return confirm('Clear Radarr URL/API key and disable Radarr?');">Reset Radarr</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1177,37 +1282,51 @@ def settings():
                   <div class="muted">Optional</div>
                 </div>
                 <div class="bd">
-                  <div class="form">
-                    <div class="field">
-                      <label>Sonarr URL</label>
-                      <input type="text" name="SONARR_URL"
-                             value="{safe_html(cfg["SONARR_URL"])}"
-                             data-initial="{safe_html(cfg["SONARR_URL"])}">
+
+                  <div class="toggleRow">
+                    <div>
+                      <div style="font-weight:800;">Enable Sonarr</div>
+                      <div class="muted">Turn on if you want Sonarr support.</div>
                     </div>
-                    <div class="field">
-                      <label>Sonarr API Key</label>
-                      <input type="password" name="SONARR_API_KEY"
-                             value="{safe_html(cfg["SONARR_API_KEY"])}"
-                             data-initial="{safe_html(cfg["SONARR_API_KEY"])}">
-                    </div>
+                    <label class="switch" title="Enable/Disable Sonarr">
+                      <input id="sonarr_enabled" name="SONARR_ENABLED" type="checkbox" {"checked" if sonarr_enabled else ""}>
+                      <span class="slider"></span>
+                    </label>
                   </div>
 
-                  <div class="btnrow" style="margin-top:14px;">
-                    <button id="testSonarrBtn"
-                            class="btn good"
-                            type="submit"
-                            formaction="/test-sonarr"
-                            formmethod="post"
-                            {sonarr_test_disabled_attr}
-                            title="{safe_html(sonarr_test_title)}">{safe_html(sonarr_test_label)}</button>
+                  <div id="sonarrSection">
+                    <div class="form">
+                      <div class="field">
+                        <label>Sonarr URL</label>
+                        <input type="text" name="SONARR_URL"
+                               value="{safe_html(cfg["SONARR_URL"])}"
+                               data-initial="{safe_html(cfg["SONARR_URL"])}">
+                      </div>
+                      <div class="field">
+                        <label>Sonarr API Key</label>
+                        <input type="password" name="SONARR_API_KEY"
+                               value="{safe_html(cfg["SONARR_API_KEY"])}"
+                               data-initial="{safe_html(cfg["SONARR_API_KEY"])}">
+                      </div>
+                    </div>
 
-                    <button class="btn bad"
-                            type="submit"
-                            formaction="/reset-sonarr"
-                            formmethod="post"
-                            onclick="return confirm('Clear Sonarr URL/API key?');">Reset Sonarr</button>
+                    <div class="btnrow" style="margin-top:14px;">
+                      <button id="testSonarrBtn"
+                              class="btn good"
+                              type="submit"
+                              formaction="/test-sonarr"
+                              formmethod="post"
+                              {sonarr_test_disabled_attr}
+                              title="{safe_html(sonarr_test_title)}">{safe_html(sonarr_test_label)}</button>
 
-                    <div class="muted">Leave blank if you don’t use Sonarr.</div>
+                      <button class="btn bad"
+                              type="submit"
+                              formaction="/reset-sonarr"
+                              formmethod="post"
+                              onclick="return confirm('Clear Sonarr URL/API key and disable Sonarr?');">Reset Sonarr</button>
+
+                      <div class="muted">Leave blank if you don’t use Sonarr.</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1254,6 +1373,10 @@ def save_settings():
     old = load_config()
     cfg = load_config()
 
+    # toggles
+    cfg["RADARR_ENABLED"] = checkbox("RADARR_ENABLED")
+    cfg["SONARR_ENABLED"] = checkbox("SONARR_ENABLED")
+
     cfg["RADARR_URL"] = (request.form.get("RADARR_URL") or "").rstrip("/")
     cfg["RADARR_API_KEY"] = request.form.get("RADARR_API_KEY") or ""
     cfg["SONARR_URL"] = (request.form.get("SONARR_URL") or "").rstrip("/")
@@ -1269,16 +1392,23 @@ def save_settings():
     if old.get("SONARR_URL") != cfg["SONARR_URL"] or old.get("SONARR_API_KEY") != cfg["SONARR_API_KEY"]:
         cfg["SONARR_OK"] = False
 
-    if not cfg.get("RADARR_OK", False):
-        flash("Please click Test Connection for Radarr and make sure it shows Connected before saving.", "error")
-        save_config(cfg)
-        return redirect("/settings")
+    # Validation respecting toggles
+    if cfg.get("RADARR_ENABLED", True):
+        if not cfg.get("RADARR_OK", False):
+            flash("Radarr enabled: click Test Connection and make sure it shows Connected before saving.", "error")
+            save_config(cfg)
+            return redirect("/settings")
+    else:
+        cfg["RADARR_OK"] = False
 
     sonarr_configured = bool((cfg.get("SONARR_URL") or "").strip() or (cfg.get("SONARR_API_KEY") or "").strip())
-    if sonarr_configured and not cfg.get("SONARR_OK", False):
-        flash("Please click Test Connection for Sonarr (or clear Sonarr fields) before saving.", "error")
-        save_config(cfg)
-        return redirect("/settings")
+    if cfg.get("SONARR_ENABLED", False):
+        if sonarr_configured and not cfg.get("SONARR_OK", False):
+            flash("Sonarr enabled: click Test Connection (or clear Sonarr fields) before saving.", "error")
+            save_config(cfg)
+            return redirect("/settings")
+    else:
+        cfg["SONARR_OK"] = False
 
     save_config(cfg)
     flash("Settings saved ✔", "success")
@@ -1289,9 +1419,8 @@ def save_settings():
 def jobs_page():
     cfg = load_config()
 
-    # Fetch Radarr tags for Tag Label dropdown
     labels = []
-    if cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK"):
+    if cfg.get("RADARR_ENABLED", True) and cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK"):
         try:
             tags = radarr_get(cfg, "/api/v3/tag")
             labels = sorted({t.get("label") for t in (tags or []) if t.get("label")}, key=lambda x: str(x).lower())
@@ -1584,7 +1713,6 @@ def jobs_delete():
     if not jobs:
         j = job_defaults()
         j["name"] = "Default Job"
-        j["TAG_LABEL"] = ""
         jobs = [normalize_job(j)]
 
     cfg["JOBS"] = [normalize_job(j) for j in jobs]
