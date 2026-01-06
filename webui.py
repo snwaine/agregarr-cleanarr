@@ -107,7 +107,7 @@ def job_defaults() -> Dict[str, Any]:
         "id": make_job_id(),
         "name": "New Job",
         "enabled": True,
-        "TAG_LABEL": "autodelete30",
+        "TAG_LABEL": "",
         "DAYS_OLD": 30,
         "SCHED_DAY": "daily",
         "SCHED_HOUR": 3,
@@ -177,8 +177,6 @@ def load_config() -> Dict[str, Any]:
     if not jobs:
         j = job_defaults()
         j["name"] = "Default Job"
-        # default tag should be empty until user selects, but keep existing behavior if you like:
-        j["TAG_LABEL"] = ""
         jobs = [normalize_job(j)]
 
     cfg["JOBS"] = jobs
@@ -311,20 +309,21 @@ BASE_HEAD = """
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root{
-    --bg:#0b0f14;
-    --panel:#0f1620;
-    --panel2:#0c121b;
-    --muted:#9aa7b2;
-    --text:#e6edf3;
-    --line:#1f2a36;
-    --line2:#283241;
+    /* Lighter dark theme */
+    --bg:#111827;
+    --panel:#1f2937;
+    --panel2:#1b2431;
+    --muted:#9ca3af;
+    --text:#f1f5f9;
+    --line:#334155;
+    --line2:#475569;
 
     --accent:#22c55e;
     --accent2:#16a34a;
 
     --warn:#f59e0b;
     --bad:#ef4444;
-    --shadow: 0 12px 30px rgba(0,0,0,.35);
+    --shadow: 0 12px 28px rgba(0,0,0,.28);
   }
 
   [data-theme="light"]{
@@ -352,7 +351,7 @@ BASE_HEAD = """
     margin:0;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
     background:
-      radial-gradient(1200px 700px at 20% 0%, rgba(34,197,94,.18), transparent 60%),
+      radial-gradient(1200px 700px at 20% 0%, rgba(34,197,94,.16), transparent 60%),
       radial-gradient(900px 600px at 100% 10%, rgba(34,197,94,.10), transparent 55%),
       var(--bg);
     background-attachment: fixed;
@@ -373,7 +372,7 @@ BASE_HEAD = """
     padding: 14px 16px;
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+    background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
     box-shadow: var(--shadow);
     position: sticky;
     top: 14px;
@@ -384,14 +383,14 @@ BASE_HEAD = """
   .logoWrap{
     width: 38px; height: 38px; border-radius: 12px;
     border: 1px solid var(--line2);
-    background: rgba(255,255,255,.03);
+    background: rgba(255,255,255,.04);
     overflow:hidden;
     display:flex; align-items:center; justify-content:center;
   }
   .logoBadge{
     width: 38px; height: 38px; border-radius: 12px;
     background: linear-gradient(135deg, rgba(34,197,94,.92), rgba(22,163,74,.65));
-    box-shadow: 0 10px 24px rgba(34,197,94,.20);
+    box-shadow: 0 10px 24px rgba(34,197,94,.18);
   }
   .logoImg{
     width: 100%;
@@ -415,8 +414,8 @@ BASE_HEAD = """
     color: var(--text);
   }
   .pill.active{
-    border-color: rgba(34,197,94,.65);
-    box-shadow: 0 0 0 3px rgba(34,197,94,.18);
+    border-color: rgba(34,197,94,.55);
+    box-shadow: 0 0 0 3px rgba(34,197,94,.16);
   }
 
   .grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 14px; margin-top: 16px; }
@@ -425,7 +424,7 @@ BASE_HEAD = """
     grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
-    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+    background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
     box-shadow: var(--shadow);
     overflow:hidden;
   }
@@ -434,7 +433,7 @@ BASE_HEAD = """
     border-bottom: 1px solid var(--line);
     display:flex; align-items:center; justify-content: space-between;
     gap:12px;
-    background: rgba(0,0,0,.12);
+    background: rgba(0,0,0,.10);
   }
   [data-theme="light"] .card .hd{ background: rgba(255,255,255,.55); }
   .card .hd h2{ margin:0; font-size: 14px; letter-spacing:.2px; }
@@ -442,7 +441,7 @@ BASE_HEAD = """
 
   .muted{ color: var(--muted); }
   code{
-    background: rgba(255,255,255,.06);
+    background: rgba(255,255,255,.08);
     border: 1px solid var(--line2);
     padding: 2px 7px;
     border-radius: 10px;
@@ -463,19 +462,19 @@ BASE_HEAD = """
     font-weight: 600;
     font-size: 13px;
   }
-  .btn:hover{ border-color: rgba(34,197,94,.55); }
+  .btn:hover{ border-color: rgba(34,197,94,.45); }
   .btn:disabled{
     opacity: .45;
     cursor: not-allowed;
     filter: grayscale(0.35);
   }
   .btn.primary{
-    border-color: rgba(34,197,94,.55);
-    background: linear-gradient(135deg, rgba(34,197,94,.28), rgba(34,197,94,.10));
+    border-color: rgba(34,197,94,.45);
+    background: linear-gradient(135deg, rgba(34,197,94,.26), rgba(34,197,94,.10));
   }
   .btn.good{
-    border-color: rgba(34,197,94,.55);
-    background: linear-gradient(135deg, rgba(34,197,94,.22), rgba(34,197,94,.08));
+    border-color: rgba(34,197,94,.45);
+    background: linear-gradient(135deg, rgba(34,197,94,.20), rgba(34,197,94,.08));
   }
   .btn.warn{
     border-color: rgba(245,158,11,.55);
@@ -493,7 +492,7 @@ BASE_HEAD = """
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 10px 12px;
-    background: rgba(0,0,0,.18);
+    background: rgba(0,0,0,.14);
     position: relative;
   }
   [data-theme="light"] .field{ background: rgba(0,0,0,.03); }
@@ -503,7 +502,7 @@ BASE_HEAD = """
   .field input[type=text], .field input[type=password], .field input[type=number], .field select{
     width: 100%;
     border: 1px solid var(--line2);
-    background: rgba(255,255,255,.04);
+    background: rgba(255,255,255,.05);
     color: var(--text);
     padding: 10px 10px;
     border-radius: 12px;
@@ -533,8 +532,8 @@ BASE_HEAD = """
   [data-theme="light"] .field select{ background: rgba(0,0,0,.02); }
 
   body[data-theme="dark"] .field select option{
-    background-color: #0f1620;
-    color: #e6edf3;
+    background-color: #1f2937;
+    color: #f1f5f9;
   }
   body[data-theme="light"] .field select option{
     background-color: #ffffff;
@@ -542,8 +541,8 @@ BASE_HEAD = """
   }
 
   .field input:focus, .field select:focus{
-    border-color: rgba(34,197,94,.65);
-    box-shadow: 0 0 0 3px rgba(34,197,94,.15);
+    border-color: rgba(34,197,94,.55);
+    box-shadow: 0 0 0 3px rgba(34,197,94,.14);
   }
 
   .checks{ display:flex; flex-direction: column; gap: 10px; margin-top: 4px; }
@@ -552,7 +551,7 @@ BASE_HEAD = """
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 10px 12px;
-    background: rgba(0,0,0,.18);
+    background: rgba(0,0,0,.14);
   }
   [data-theme="light"] .check{ background: rgba(0,0,0,.03); }
   .check input{ transform: scale(1.2); }
@@ -563,7 +562,7 @@ BASE_HEAD = """
     grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
-    background: rgba(0,0,0,.12);
+    background: rgba(0,0,0,.10);
     overflow:hidden;
   }
   [data-theme="light"] .jobCard{ background: rgba(0,0,0,.02); }
@@ -586,15 +585,15 @@ BASE_HEAD = """
     color: var(--text);
     background: rgba(255,255,255,.03);
   }
-  .tagPill.ok { border-color: rgba(34,197,94,.55); }
+  .tagPill.ok { border-color: rgba(34,197,94,.45); }
   .tagPill.off { opacity: .6; }
 
   table{ width:100%; border-collapse: collapse; overflow:hidden; border-radius: 14px; border: 1px solid var(--line); }
   th, td{ padding: 10px 10px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
   th{
     text-align:left;
-    color:#cbd5e1;
-    background: rgba(255,255,255,.04);
+    color:#e5e7eb;
+    background: rgba(255,255,255,.05);
     position: sticky;
     top: 0;
   }
@@ -605,7 +604,7 @@ BASE_HEAD = """
   /* Modal */
   .modalBack{
     position: fixed; inset: 0;
-    background: rgba(0,0,0,.72);
+    background: rgba(0,0,0,.68);
     backdrop-filter: blur(6px);
     display:none;
     align-items:center;
@@ -628,7 +627,7 @@ BASE_HEAD = """
     align-items:center;
     justify-content: space-between;
     gap: 12px;
-    background: rgba(0,0,0,.18);
+    background: rgba(0,0,0,.12);
   }
   [data-theme="light"] .modal .mh{ background: rgba(0,0,0,.03); }
   .modal .mh h3{ margin:0; font-size: 14px; letter-spacing: .2px; }
@@ -639,7 +638,7 @@ BASE_HEAD = """
     display:flex;
     justify-content: flex-end;
     gap: 10px;
-    background: rgba(0,0,0,.14);
+    background: rgba(0,0,0,.10);
   }
   [data-theme="light"] .modal .mf{ background: rgba(0,0,0,.02); }
 
@@ -658,7 +657,7 @@ BASE_HEAD = """
   .toast{
     pointer-events: auto;
     border: 1px solid var(--line2);
-    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+    background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.035));
     box-shadow: var(--shadow);
     border-radius: 14px;
     padding: 12px 12px;
@@ -669,14 +668,13 @@ BASE_HEAD = """
     animation: toastIn .18s ease-out forwards, toastOut .25s ease-in forwards;
     animation-delay: 0s, 5s;
   }
-  .toast.ok{ border-color: rgba(34,197,94,.55); }
+  .toast.ok{ border-color: rgba(34,197,94,.45); }
   .toast.err{ border-color: rgba(239,68,68,.55); }
   @keyframes toastIn { to { opacity: 1; transform: translateY(0); } }
   @keyframes toastOut { to { opacity: 0; transform: translateY(10px); } }
 </style>
 
 <script>
-  // ---------- Modal helpers ----------
   function showModal(id) {
     const back = document.getElementById(id);
     if (back) back.style.display = "flex";
@@ -686,7 +684,6 @@ BASE_HEAD = """
     if (back) back.style.display = "none";
   }
 
-  // Job modal should only close via Cancel/Save redirect:
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       hideModal("runNowBack"); // only this one
@@ -702,7 +699,6 @@ BASE_HEAD = """
     if (el) el.checked = !!v;
   }
 
-  // Ensure job tag select can show a value even if it's not in Radarr anymore
   function ensureSelectOption(selectId, value) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
@@ -719,7 +715,6 @@ BASE_HEAD = """
     sel.insertBefore(opt, sel.firstChild);
   }
 
-  // ---------- Job modal ----------
   function openNewJob() {
     const form = document.getElementById("jobForm");
     if (!form) return;
@@ -728,10 +723,7 @@ BASE_HEAD = """
     setVal("job_id", "");
     setVal("job_name", "New Job");
     setVal("job_enabled", "1");
-
-    // tag starts empty until user picks
-    setVal("job_tag", "");
-
+    setVal("job_tag", ""); // must select
     setVal("job_days", "30");
     setVal("job_day", "daily");
     setVal("job_hour", "3");
@@ -769,7 +761,6 @@ BASE_HEAD = """
     showModal("jobBack");
   }
 
-  // ---------- Run Now confirm ----------
   function openRunNowConfirm(jobId) {
     const hid = document.getElementById("runNowJobId");
     if (hid) hid.value = jobId || "";
@@ -780,7 +771,6 @@ BASE_HEAD = """
     if (form) form.submit();
   }
 
-  // ---------- Settings: dirty + save gating ----------
   function isDirty(settingsForm) {
     if (!settingsForm) return false;
     const els = settingsForm.querySelectorAll("input, select, textarea");
@@ -847,7 +837,6 @@ BASE_HEAD = """
   document.addEventListener("input", onSettingsEdited);
   document.addEventListener("change", onSettingsEdited);
 
-  // ---------- Reopen job modal after server-side validation errors ----------
   document.addEventListener("DOMContentLoaded", () => {
     updateSaveState();
 
@@ -981,7 +970,6 @@ def toggle_theme():
     return redirect(request.referrer or "/dashboard")
 
 
-# -------- Reset buttons --------
 @app.post("/reset-radarr")
 def reset_radarr():
     cfg = load_config()
@@ -1004,7 +992,6 @@ def reset_sonarr():
     return redirect("/settings")
 
 
-# -------- Test connections (save values on success) --------
 @app.post("/test-radarr")
 def test_radarr():
     cfg = load_config()
@@ -1584,7 +1571,6 @@ def jobs_delete():
     if not jobs:
         j = job_defaults()
         j["name"] = "Default Job"
-        j["TAG_LABEL"] = ""
         jobs = [normalize_job(j)]
 
     cfg["JOBS"] = [normalize_job(j) for j in jobs]
