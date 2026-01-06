@@ -841,6 +841,7 @@ BASE_HEAD = """
   }
 
   .modal form .mf{
+    box-shadow: 0 -10px 18px rgba(0,0,0,.22);
     flex: 0 0 auto;
     position: sticky;
     bottom: 0;
@@ -848,7 +849,9 @@ BASE_HEAD = """
   }
 
   [data-theme="light"] .modal .mf{ background: #f3f4f6; }
+  [data-theme="light"] .modal form .mf{ box-shadow: 0 -10px 18px rgba(0,0,0,.08);
 
+}
   /* Toasts */
   .toastHost{
     position: fixed;
