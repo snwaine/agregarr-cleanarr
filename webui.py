@@ -742,7 +742,15 @@ BASE_HEAD = """
   [data-theme="light"] .jobTop{ background: #f3f4f6; }
   .jobName{ font-weight: 800; letter-spacing:.2px; }
   .jobMeta{ margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.35; }
-  .jobBody{ padding: 12px 12px; display:flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items:center; background: var(--panel2); }
+  .jobBody{
+    padding: 12px 12px;
+    display:flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items:center;
+    background: var(--panel2);
+  }
   [data-theme="light"] .jobBody{ background: #ffffff; }
   .tagPill{
     border: 1px solid var(--line2);
@@ -786,6 +794,9 @@ BASE_HEAD = """
     background: var(--panel);
     box-shadow: var(--shadow);
     overflow:hidden;
+    max-height: calc(100vh - 40px);
+    display:flex;
+    flex-direction: column;
   }
   .modal .mh{
     padding: 14px 16px;
@@ -795,10 +806,16 @@ BASE_HEAD = """
     justify-content: space-between;
     gap: 12px;
     background: var(--panel2);
+    flex: 0 0 auto;
   }
   [data-theme="light"] .modal .mh{ background: #f3f4f6; }
   .modal .mh h3{ margin:0; font-size: 14px; letter-spacing: .2px; }
-  .modal .mb{ padding: 14px 16px; background: var(--panel); }
+  .modal .mb{
+    padding: 14px 16px;
+    background: var(--panel);
+    overflow: auto;               /* scrollable content */
+    flex: 1 1 auto;
+  }
   .modal .mf{
     padding: 14px 16px;
     border-top: 1px solid var(--line);
@@ -806,6 +823,7 @@ BASE_HEAD = """
     justify-content: flex-end;
     gap: 10px;
     background: var(--panel2);
+    flex: 0 0 auto;
   }
   [data-theme="light"] .modal .mf{ background: #f3f4f6; }
 
@@ -919,7 +937,6 @@ BASE_HEAD = """
     form.action = "/jobs/save";
     setVal("job_id", "");
     setVal("job_name", "New Job");
-    setVal("job_enabled", "1");
 
     const appSel = document.getElementById("job_app");
     const defApp = appSel?.getAttribute("data-default-app") || "radarr";
@@ -933,6 +950,9 @@ BASE_HEAD = """
     setChecked("job_delete", true);
     setChecked("job_excl", false);
 
+    // enabled moved to last field
+    setVal("job_enabled", "1");
+
     const t = document.getElementById("jobTitle");
     if (t) t.textContent = "Add Job";
     showModal("jobBack");
@@ -945,7 +965,6 @@ BASE_HEAD = """
     form.action = "/jobs/save";
     setVal("job_id", btn.getAttribute("data-id") || "");
     setVal("job_name", btn.getAttribute("data-name") || "Job");
-    setVal("job_enabled", (btn.getAttribute("data-enabled") || "1"));
 
     const appKey = btn.getAttribute("data-app") || "radarr";
     setVal("job_app", appKey);
@@ -959,6 +978,9 @@ BASE_HEAD = """
     setChecked("job_dry", (btn.getAttribute("data-dry") || "1") === "1");
     setChecked("job_delete", (btn.getAttribute("data-del") || "1") === "1");
     setChecked("job_excl", (btn.getAttribute("data-excl") || "0") === "1");
+
+    // enabled moved to last field
+    setVal("job_enabled", (btn.getAttribute("data-enabled") || "1"));
 
     const t = document.getElementById("jobTitle");
     if (t) t.textContent = "Edit Job";
@@ -1087,7 +1109,6 @@ BASE_HEAD = """
 
       setVal("job_id", jid);
       setVal("job_name", decodeURIComponent(name));
-      setVal("job_enabled", enabled);
       setVal("job_app", appKey);
 
       const tagDecoded = decodeURIComponent(tag || "");
@@ -1099,6 +1120,9 @@ BASE_HEAD = """
       setChecked("job_dry", dry);
       setChecked("job_delete", del);
       setChecked("job_excl", excl);
+
+      // enabled moved to last
+      setVal("job_enabled", enabled);
 
       showModal("jobBack");
     }
@@ -1364,7 +1388,11 @@ def settings():
                       <div class="muted">Turn off to ignore Radarr features.</div>
                     </div>
                     <label class="switch" title="Enable/Disable Radarr">
-                      <input id="radarr_enabled" name="RADARR_ENABLED" type="checkbox" {"checked" if radarr_enabled else ""}>
+                      <input id="radarr_enabled"
+                             name="RADARR_ENABLED"
+                             type="checkbox"
+                             {"checked" if radarr_enabled else ""}
+                             data-initial="{ '1' if radarr_enabled else '0' }">
                       <span class="slider"></span>
                     </label>
                   </div>
@@ -1417,7 +1445,11 @@ def settings():
                       <div class="muted">Turn on if you want Sonarr support.</div>
                     </div>
                     <label class="switch" title="Enable/Disable Sonarr">
-                      <input id="sonarr_enabled" name="SONARR_ENABLED" type="checkbox" {"checked" if sonarr_enabled else ""}>
+                      <input id="sonarr_enabled"
+                             name="SONARR_ENABLED"
+                             type="checkbox"
+                             {"checked" if sonarr_enabled else ""}
+                             data-initial="{ '1' if sonarr_enabled else '0' }">
                       <span class="slider"></span>
                     </label>
                   </div>
@@ -1519,6 +1551,7 @@ def save_settings():
     if old.get("SONARR_URL") != cfg["SONARR_URL"] or old.get("SONARR_API_KEY") != cfg["SONARR_API_KEY"]:
         cfg["SONARR_OK"] = False
 
+    # Validation respecting toggles
     if cfg.get("RADARR_ENABLED", True):
         if not cfg.get("RADARR_OK", False):
             flash("Radarr enabled: click Test Connection and make sure it shows Connected before saving.", "error")
@@ -1563,8 +1596,6 @@ def jobs_page():
         available_apps.append("sonarr")
 
     # Default app selection in modal:
-    # - If only one is available, preselect and disable dropdown
-    # - Else prefer radarr if available
     default_app = "radarr"
     if len(available_apps) == 1:
         default_app = available_apps[0]
@@ -1598,25 +1629,18 @@ def jobs_page():
             <input type="hidden" name="job_id" id="job_id" value="">
 
             <div class="form">
-              <div class="field">
-                <label>App</label>
-                <select name="APP" id="job_app" onchange="onJobAppChanged()"
-                        data-default-app="{safe_html(default_app)}" {app_disabled_attr}>
-                  <option value="radarr">Radarr</option>
-                  <option value="sonarr">Sonarr</option>
-                </select>
-              </div>
-
+              <!-- Job Name BEFORE App -->
               <div class="field">
                 <label>Job Name</label>
                 <input type="text" name="name" id="job_name" value="New Job" required>
               </div>
 
               <div class="field">
-                <label>Enabled</label>
-                <select name="enabled" id="job_enabled">
-                  <option value="1">Enabled</option>
-                  <option value="0">Disabled</option>
+                <label>App</label>
+                <select name="APP" id="job_app" onchange="onJobAppChanged()"
+                        data-default-app="{safe_html(default_app)}" {app_disabled_attr}>
+                  <option value="radarr">Radarr</option>
+                  <option value="sonarr">Sonarr</option>
                 </select>
               </div>
 
@@ -1650,6 +1674,15 @@ def jobs_page():
                 <label>Scheduler Time</label>
                 <select name="SCHED_HOUR" id="job_hour">
                   {hour_opts}
+                </select>
+              </div>
+
+              <!-- Enabled moved to LAST -->
+              <div class="field">
+                <label>Enabled</label>
+                <select name="enabled" id="job_enabled">
+                  <option value="1">Enabled</option>
+                  <option value="0">Disabled</option>
                 </select>
               </div>
             </div>
@@ -1783,6 +1816,25 @@ def jobs_page():
           </div>
         """)
 
+    # Disable Add Job if neither Radarr nor Sonarr is connected (no tags available)
+    can_add_job = len(available_apps) > 0
+    add_job_disabled_attr = "" if can_add_job else "disabled"
+    add_job_title = "Add Job" if can_add_job else "Connect Radarr or Sonarr in Settings (Test Connection) to add a job."
+
+    add_job_button = f"""
+      <button class="btn primary" type="button" onclick="openNewJob()" {add_job_disabled_attr}
+              title="{safe_html(add_job_title)}">Add Job</button>
+    """
+
+    hint_html = ""
+    if not can_add_job:
+        hint_html = """
+          <div class="muted" style="margin-top:12px;">
+            Add Job is disabled because neither Radarr nor Sonarr is connected.
+            Go to <a href="/settings"><b>Settings</b></a> and use <b>Test Connection</b>.
+          </div>
+        """
+
     body = f"""
       {tags_js}
 
@@ -1791,7 +1843,7 @@ def jobs_page():
           <div class="hd">
             <h2>Jobs</h2>
             <div class="btnrow">
-              <button class="btn primary" type="button" onclick="openNewJob()">Add Job</button>
+              {add_job_button}
               <form method="post" action="/apply-cron" style="margin:0;">
                 <button class="btn warn" type="submit">Apply Cron</button>
               </form>
@@ -1802,9 +1854,7 @@ def jobs_page():
             <div class="jobsGrid">
               {''.join(job_cards)}
             </div>
-            <div class="muted" style="margin-top:12px;">
-              Tip: If only one app is connected, the App selector is auto-selected.
-            </div>
+            {hint_html}
           </div>
         </div>
       </div>
@@ -2122,7 +2172,6 @@ def status():
             if k == "JOBS":
                 rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>[{len(v or [])} jobs]</td></tr>")
             elif "API_KEY" in str(k).upper():
-                # Don't leak keys in status page
                 rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>***</td></tr>")
             else:
                 rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>{safe_html(str(v))}</td></tr>")
