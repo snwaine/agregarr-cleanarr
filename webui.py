@@ -1761,7 +1761,7 @@ def jobs_page():
                 <select name="SONARR_DELETE_MODE" id="job_sonarr_mode">
                   <option value="episodes_only">Episodes only (keep series in Sonarr)</option>
                   <option value="episodes_then_series_if_empty">Episodes, Series only if empty (remove series from Sonarr)</option>
-                  <option value="Whole series (remove from Sonarr</option>
+                  <option value="series_whole">Whole series (remove from Sonarr)</option>
                 </select>
               </div>
 
