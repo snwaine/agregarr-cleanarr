@@ -683,6 +683,23 @@ BASE_HEAD = """
     if (el) el.checked = !!v;
   }
 
+  // Ensure a select contains an option (useful if a job has a tag that's not currently in Radarr)
+  function ensureSelectOption(selectId, value) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    const v = (value ?? "").toString();
+    if (!v) return;
+
+    for (const opt of sel.options) {
+      if (opt.value === v) return;
+    }
+
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v + " (missing in Radarr)";
+    sel.insertBefore(opt, sel.firstChild);
+  }
+
   // ---------- Job modal ----------
   function openNewJob() {
     const form = document.getElementById("jobForm");
@@ -692,7 +709,10 @@ BASE_HEAD = """
     setVal("job_id", "");
     setVal("job_name", "New Job");
     setVal("job_enabled", "1");
+
+    ensureSelectOption("job_tag", "autodelete30");
     setVal("job_tag", "autodelete30");
+
     setVal("job_days", "30");
     setVal("job_day", "daily");
     setVal("job_hour", "3");
@@ -713,7 +733,11 @@ BASE_HEAD = """
     setVal("job_id", btn.getAttribute("data-id") || "");
     setVal("job_name", btn.getAttribute("data-name") || "Job");
     setVal("job_enabled", (btn.getAttribute("data-enabled") || "1"));
-    setVal("job_tag", btn.getAttribute("data-tag") || "autodelete30");
+
+    const tag = btn.getAttribute("data-tag") || "autodelete30";
+    ensureSelectOption("job_tag", tag);
+    setVal("job_tag", tag);
+
     setVal("job_days", btn.getAttribute("data-days") || "30");
     setVal("job_day", btn.getAttribute("data-day") || "daily");
     setVal("job_hour", btn.getAttribute("data-hour") || "3");
@@ -841,7 +865,11 @@ BASE_HEAD = """
         setVal("job_id", jid);
         setVal("job_name", decodeURIComponent(name));
         setVal("job_enabled", enabled);
-        setVal("job_tag", decodeURIComponent(tag));
+
+        const tagDecoded = decodeURIComponent(tag);
+        ensureSelectOption("job_tag", tagDecoded);
+        setVal("job_tag", tagDecoded);
+
         setVal("job_days", days);
         setVal("job_day", day);
         setVal("job_hour", hour);
@@ -1114,6 +1142,27 @@ def save_settings():
 def jobs_page():
     cfg = load_config()
 
+    # Fetch Radarr tags for Tag Label dropdown
+    labels = []
+    if cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY"):
+        try:
+            tags = radarr_get(cfg, "/api/v3/tag")
+            labels = sorted(
+                {t.get("label") for t in (tags or []) if t.get("label")},
+                key=lambda x: str(x).lower()
+            )
+        except Exception:
+            labels = []
+
+    # Always ensure at least one sensible option
+    if not labels:
+        labels = ["autodelete30"]
+
+    tag_opts = "".join(
+        f'<option value="{safe_html(lbl)}">{safe_html(lbl)}</option>'
+        for lbl in labels
+    )
+
     # Job modal HTML
     hour_opts = "".join([f'<option value="{h}">{h:02d}:00</option>' for h in range(0, 24)])
 
@@ -1145,7 +1194,9 @@ def jobs_page():
 
               <div class="field">
                 <label>Tag Label</label>
-                <input type="text" name="TAG_LABEL" id="job_tag" value="autodelete30" required>
+                <select name="TAG_LABEL" id="job_tag" required>
+                  {tag_opts}
+                </select>
               </div>
 
               <div class="field">
@@ -1272,7 +1323,7 @@ def jobs_page():
             <div class="jobBody">
               <div class="btnrow">
                 <span class="tagPill {enabled_cls}">{enabled_text}</span>
-                <span class="tagPill">ID: <code>{safe_html(j["id"])}</code></span>
+                <span class="tagPill">ID: <code>{safe_html(j["id"])}"></code></span>
               </div>
 
               <div class="btnrow">
