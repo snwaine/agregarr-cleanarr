@@ -329,6 +329,10 @@ BASE_HEAD = """
     color: var(--text);
   }
 
+  /* Helps browsers render native controls (select/options) correctly */
+  body[data-theme="dark"] { color-scheme: dark; }
+  body[data-theme="light"] { color-scheme: light; }
+
   a{ color: var(--text); text-decoration: none; }
   a:hover{ text-decoration: underline; }
 
@@ -455,14 +459,18 @@ BASE_HEAD = """
 
   .form{ display:grid; grid-template-columns: 1fr; gap: 12px; }
   @media(min-width: 900px){ .form{ grid-template-columns: 1fr 1fr; } }
+
   .field{
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 10px 12px;
     background: rgba(0,0,0,.18);
+    position: relative; /* for select arrow */
   }
   [data-theme="light"] .field{ background: rgba(0,0,0,.03); }
+
   .field label{ display:block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+
   .field input[type=text], .field input[type=password], .field input[type=number], .field select{
     width: 100%;
     border: 1px solid var(--line2);
@@ -473,6 +481,45 @@ BASE_HEAD = """
     outline: none;
   }
   [data-theme="light"] .field input, [data-theme="light"] .field select{ background: rgba(0,0,0,.02); }
+
+  /* ===== Dropdown (select) dark-theme fixes ===== */
+  .field select{
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+
+    background: rgba(255,255,255,.06);
+    padding-right: 36px; /* space for arrow */
+    cursor: pointer;
+
+    /* custom arrow (no extra markup needed) */
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position:
+      calc(100% - 18px) 50%,
+      calc(100% - 12px) 50%;
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+  }
+  [data-theme="light"] .field select{
+    background: rgba(0,0,0,.02);
+  }
+
+  /* The open dropdown list (options) */
+  body[data-theme="dark"] .field select option{
+    background-color: #0f1620; /* matches --panel */
+    color: #e6edf3;           /* matches --text */
+  }
+  body[data-theme="light"] .field select option{
+    background-color: #ffffff;
+    color: #0b1220;
+  }
+  body[data-theme="dark"] .field select option:checked{
+    background-color: #1f2a36; /* matches --line */
+    color: #e6edf3;
+  }
+
   .field input:focus, .field select:focus{
     border-color: rgba(34,197,94,.65);
     box-shadow: 0 0 0 3px rgba(34,197,94,.15);
