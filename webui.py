@@ -145,7 +145,8 @@ def load_config() -> Dict[str, Any]:
     cfg = {
         "RADARR_URL": env_default("RADARR_URL", "http://radarr:7878").rstrip("/"),
         "RADARR_API_KEY": env_default("RADARR_API_KEY", ""),
-        "SONARR_URL": env_default("SONARR_URL", "http://sonarr:8989").rstrip("/"),
+        # Sonarr is optional -> default EMPTY (so it doesn't "revert" to a placeholder unless user sets it)
+        "SONARR_URL": env_default("SONARR_URL", "").rstrip("/"),
         "SONARR_API_KEY": env_default("SONARR_API_KEY", ""),
         "HTTP_TIMEOUT_SECONDS": int(env_default("HTTP_TIMEOUT_SECONDS", "30")),
         "UI_THEME": env_default("UI_THEME", "dark"),
@@ -223,7 +224,7 @@ def logo_mime(p: Path) -> str:
 
 
 # --------------------------
-# Radarr helpers
+# Radarr / Sonarr helpers
 # --------------------------
 def radarr_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
     return {"X-Api-Key": cfg.get("RADARR_API_KEY", "")}
@@ -236,9 +237,6 @@ def radarr_get(cfg: Dict[str, Any], path: str):
     return r.json()
 
 
-# --------------------------
-# Sonarr helpers (for Settings test only)
-# --------------------------
 def sonarr_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
     return {"X-Api-Key": cfg.get("SONARR_API_KEY", "")}
 
@@ -356,7 +354,6 @@ BASE_HEAD = """
 
   * { box-sizing: border-box; }
 
-  /* ✅ Make gradient always fill the viewport */
   html, body { height: 100%; }
   html { scroll-behavior: auto; }
 
@@ -372,7 +369,6 @@ BASE_HEAD = """
     color: var(--text);
   }
 
-  /* Helps browsers render native controls (select/options) correctly */
   body[data-theme="dark"] { color-scheme: dark; }
   body[data-theme="light"] { color-scheme: light; }
 
@@ -809,10 +805,9 @@ BASE_HEAD = """
 
     const radarrOk = settingsForm.getAttribute("data-radarr-ok") === "1";
     const sonarrOk = settingsForm.getAttribute("data-sonarr-ok") === "1";
-
     const dirty = isDirty(settingsForm);
 
-    // Sonarr is optional: require "Connected" only if URL or API key has been entered
+    // Sonarr optional: require connected only if configured
     const sonarrUrl = (document.querySelector('input[name="SONARR_URL"]')?.value || "").trim();
     const sonarrKey = (document.querySelector('input[name="SONARR_API_KEY"]')?.value || "").trim();
     const sonarrConfigured = !!(sonarrUrl || sonarrKey);
@@ -1013,6 +1008,30 @@ def toggle_theme():
     return redirect(request.referrer or "/dashboard")
 
 
+# -------- Reset buttons --------
+@app.post("/reset-radarr")
+def reset_radarr():
+    cfg = load_config()
+    cfg["RADARR_URL"] = ""
+    cfg["RADARR_API_KEY"] = ""
+    cfg["RADARR_OK"] = False
+    save_config(cfg)
+    flash("Radarr settings cleared ✔", "success")
+    return redirect("/settings")
+
+
+@app.post("/reset-sonarr")
+def reset_sonarr():
+    cfg = load_config()
+    cfg["SONARR_URL"] = ""
+    cfg["SONARR_API_KEY"] = ""
+    cfg["SONARR_OK"] = False
+    save_config(cfg)
+    flash("Sonarr settings cleared ✔", "success")
+    return redirect("/settings")
+
+
+# -------- Test connections (save values on success) --------
 @app.post("/test-radarr")
 def test_radarr():
     cfg = load_config()
@@ -1042,8 +1061,13 @@ def test_radarr():
 
         r.raise_for_status()
 
+        # ✅ Save the values the user just tested (so inputs don't revert)
+        cfg["RADARR_URL"] = url
+        cfg["RADARR_API_KEY"] = api_key
         cfg["RADARR_OK"] = True
         save_config(cfg)
+
+        flash("Radarr connected ✔", "success")
         return redirect("/settings")
 
     except requests.exceptions.ConnectTimeout:
@@ -1085,8 +1109,13 @@ def test_sonarr():
 
         r.raise_for_status()
 
+        # ✅ Save the values the user just tested (so inputs don't revert)
+        cfg["SONARR_URL"] = url
+        cfg["SONARR_API_KEY"] = api_key
         cfg["SONARR_OK"] = True
         save_config(cfg)
+
+        flash("Sonarr connected ✔", "success")
         return redirect("/settings")
 
     except requests.exceptions.ConnectTimeout:
@@ -1161,6 +1190,11 @@ def settings():
                             formmethod="post"
                             {test_disabled_attr}
                             title="{safe_html(test_title)}">{safe_html(test_label)}</button>
+
+                    <form method="post" action="/reset-radarr" style="margin:0;"
+                          onsubmit="return confirm('Clear Radarr URL/API key?');">
+                      <button class="btn bad" type="submit">Reset Radarr</button>
+                    </form>
                   </div>
                 </div>
               </div>
@@ -1194,6 +1228,12 @@ def settings():
                             formmethod="post"
                             {sonarr_test_disabled_attr}
                             title="{safe_html(sonarr_test_title)}">{safe_html(sonarr_test_label)}</button>
+
+                    <form method="post" action="/reset-sonarr" style="margin:0;"
+                          onsubmit="return confirm('Clear Sonarr URL/API key?');">
+                      <button class="btn bad" type="submit">Reset Sonarr</button>
+                    </form>
+
                     <div class="muted">Leave blank if you don’t use Sonarr.</div>
                   </div>
                 </div>
@@ -1243,7 +1283,6 @@ def save_settings():
 
     cfg["RADARR_URL"] = (request.form.get("RADARR_URL") or "").rstrip("/")
     cfg["RADARR_API_KEY"] = request.form.get("RADARR_API_KEY") or ""
-
     cfg["SONARR_URL"] = (request.form.get("SONARR_URL") or "").rstrip("/")
     cfg["SONARR_API_KEY"] = request.form.get("SONARR_API_KEY") or ""
 
@@ -1252,19 +1291,18 @@ def save_settings():
     if cfg["UI_THEME"] not in ("dark", "light"):
         cfg["UI_THEME"] = "dark"
 
-    # Reset OK flags if credentials changed
     if old.get("RADARR_URL") != cfg["RADARR_URL"] or old.get("RADARR_API_KEY") != cfg["RADARR_API_KEY"]:
         cfg["RADARR_OK"] = False
     if old.get("SONARR_URL") != cfg["SONARR_URL"] or old.get("SONARR_API_KEY") != cfg["SONARR_API_KEY"]:
         cfg["SONARR_OK"] = False
 
-    # Radarr is required for this app
+    # Radarr is required for the app
     if not cfg.get("RADARR_OK", False):
         flash("Please click Test Connection for Radarr and make sure it shows Connected before saving.", "error")
         save_config(cfg)
         return redirect("/settings")
 
-    # Sonarr optional: only require "Connected" if configured
+    # Sonarr optional: only require connected if configured
     sonarr_configured = bool((cfg.get("SONARR_URL") or "").strip() or (cfg.get("SONARR_API_KEY") or "").strip())
     if sonarr_configured and not cfg.get("SONARR_OK", False):
         flash("Please click Test Connection for Sonarr (or clear Sonarr fields) before saving.", "error")
@@ -1276,6 +1314,9 @@ def save_settings():
     return redirect("/settings")
 
 
+# --------------------------
+# Jobs / Preview / Dashboard / Status
+# --------------------------
 @app.get("/jobs")
 def jobs_page():
     cfg = load_config()
