@@ -145,8 +145,12 @@ def load_config() -> Dict[str, Any]:
     cfg = {
         "RADARR_URL": env_default("RADARR_URL", "http://radarr:7878").rstrip("/"),
         "RADARR_API_KEY": env_default("RADARR_API_KEY", ""),
+        "RADARR_ENABLED": True,
+
         "SONARR_URL": env_default("SONARR_URL", "").rstrip("/"),
         "SONARR_API_KEY": env_default("SONARR_API_KEY", ""),
+        "SONARR_ENABLED": False,
+
         "HTTP_TIMEOUT_SECONDS": int(env_default("HTTP_TIMEOUT_SECONDS", "30")),
         "UI_THEME": env_default("UI_THEME", "dark"),
         "RADARR_OK": False,
@@ -167,6 +171,8 @@ def load_config() -> Dict[str, Any]:
     cfg["UI_THEME"] = t if t in ("dark", "light") else "dark"
     cfg["RADARR_OK"] = bool(cfg.get("RADARR_OK", False))
     cfg["SONARR_OK"] = bool(cfg.get("SONARR_OK", False))
+    cfg["RADARR_ENABLED"] = bool(cfg.get("RADARR_ENABLED", True))
+    cfg["SONARR_ENABLED"] = bool(cfg.get("SONARR_ENABLED", False))
     cfg["HTTP_TIMEOUT_SECONDS"] = clamp_int(cfg.get("HTTP_TIMEOUT_SECONDS", 30), 5, 300, 30)
 
     jobs = cfg.get("JOBS") or []
@@ -246,6 +252,9 @@ def parse_radarr_date(s: str):
 
 
 def preview_candidates(cfg: Dict[str, Any], job: Dict[str, Any]):
+    if not cfg.get("RADARR_ENABLED", True):
+        return {"error": "Radarr is disabled in Settings.", "candidates": [], "cutoff": ""}
+
     tag_label = (job.get("TAG_LABEL") or "").strip()
     if not tag_label:
         return {"error": "Tag is empty. Edit the job and select a tag.", "candidates": [], "cutoff": ""}
@@ -350,9 +359,12 @@ BASE_HEAD = """
     min-height: 100vh;
     margin:0;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    /* Green gradient that matches the logo */
     background:
-      radial-gradient(1200px 700px at 20% 0%, rgba(34,197,94,.16), transparent 60%),
-      radial-gradient(900px 600px at 100% 10%, rgba(34,197,94,.10), transparent 55%),
+      radial-gradient(900px 520px at 18% 8%, rgba(34,197,94,.22), transparent 62%),
+      radial-gradient(880px 520px at 92% 10%, rgba(22,163,74,.16), transparent 60%),
+      radial-gradient(700px 460px at 50% 105%, rgba(34,197,94,.10), transparent 60%),
+      linear-gradient(135deg, rgba(34,197,94,.10), rgba(22,163,74,.06)),
       var(--bg);
     background-attachment: fixed;
     color: var(--text);
@@ -510,7 +522,6 @@ BASE_HEAD = """
   }
   [data-theme="light"] .field input, [data-theme="light"] .field select{ background: rgba(0,0,0,.02); }
 
-  /* Dropdown fixes */
   .field select{
     appearance: none;
     -webkit-appearance: none;
@@ -555,6 +566,70 @@ BASE_HEAD = """
   }
   [data-theme="light"] .check{ background: rgba(0,0,0,.03); }
   .check input{ transform: scale(1.2); }
+
+  /* Toggle switch */
+  .toggleRow{
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: rgba(0,0,0,.12);
+    margin-bottom: 12px;
+  }
+  [data-theme="light"] .toggleRow{ background: rgba(0,0,0,.02); }
+
+  .switch{
+    position: relative;
+    width: 52px;
+    height: 30px;
+    display: inline-block;
+    flex: 0 0 auto;
+  }
+  .switch input{
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .slider{
+    position:absolute;
+    cursor:pointer;
+    inset:0;
+    background: rgba(255,255,255,.10);
+    border: 1px solid var(--line2);
+    transition: .18s ease;
+    border-radius: 999px;
+  }
+  .slider:before{
+    position:absolute;
+    content:"";
+    height: 22px;
+    width: 22px;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255,255,255,.85);
+    border-radius: 999px;
+    transition: .18s ease;
+    box-shadow: 0 6px 14px rgba(0,0,0,.25);
+  }
+  .switch input:checked + .slider{
+    background: linear-gradient(135deg, rgba(34,197,94,.60), rgba(22,163,74,.35));
+    border-color: rgba(34,197,94,.55);
+  }
+  .switch input:checked + .slider:before{
+    transform: translate(22px, -50%);
+    background: rgba(255,255,255,.92);
+  }
+
+  /* Disabled section look */
+  .disabledSection{
+    opacity: .55;
+    filter: grayscale(.12);
+    pointer-events: none;
+  }
 
   /* Jobs cards */
   .jobsGrid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
@@ -686,7 +761,7 @@ BASE_HEAD = """
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      hideModal("runNowBack"); // only this one
+      hideModal("runNowBack");
     }
   });
 
@@ -723,7 +798,7 @@ BASE_HEAD = """
     setVal("job_id", "");
     setVal("job_name", "New Job");
     setVal("job_enabled", "1");
-    setVal("job_tag", ""); // must select
+    setVal("job_tag", "");
     setVal("job_days", "30");
     setVal("job_day", "daily");
     setVal("job_hour", "3");
@@ -796,14 +871,20 @@ BASE_HEAD = """
     const sonarrOk = settingsForm.getAttribute("data-sonarr-ok") === "1";
     const dirty = isDirty(settingsForm);
 
+    const radarrEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
+    const sonarrEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+
     const sonarrUrl = (document.querySelector('input[name="SONARR_URL"]')?.value || "").trim();
     const sonarrKey = (document.querySelector('input[name="SONARR_API_KEY"]')?.value || "").trim();
     const sonarrConfigured = !!(sonarrUrl || sonarrKey);
-    const sonarrReady = !sonarrConfigured || sonarrOk;
 
-    saveBtn.disabled = !(radarrOk && sonarrReady && dirty);
-    if (!radarrOk) saveBtn.title = "Test Radarr connection first";
-    else if (!sonarrReady) saveBtn.title = "Test Sonarr connection first (or clear Sonarr fields)";
+    const radarrReady = !radarrEnabled || radarrOk;
+    const sonarrReady = !sonarrEnabled || (!sonarrConfigured) || sonarrOk;
+
+    saveBtn.disabled = !(radarrReady && sonarrReady && dirty);
+
+    if (!radarrReady) saveBtn.title = "Radarr enabled: test connection first (or disable Radarr)";
+    else if (!sonarrReady) saveBtn.title = "Sonarr enabled: test connection first (or disable Sonarr / clear fields)";
     else saveBtn.title = dirty ? "Save settings" : "No changes to save";
   }
 
@@ -831,6 +912,15 @@ BASE_HEAD = """
       }
     }
 
+    // Toggle visuals for sections
+    const radSec = document.getElementById("radarrSection");
+    const sonSec = document.getElementById("sonarrSection");
+    const radEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
+    const sonEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+
+    if (radSec) radSec.classList.toggle("disabledSection", !radEnabled);
+    if (sonSec) sonSec.classList.toggle("disabledSection", !sonEnabled);
+
     updateSaveState();
   }
 
@@ -838,6 +928,14 @@ BASE_HEAD = """
   document.addEventListener("change", onSettingsEdited);
 
   document.addEventListener("DOMContentLoaded", () => {
+    // initial disabled sections state
+    const radSec = document.getElementById("radarrSection");
+    const sonSec = document.getElementById("sonarrSection");
+    const radEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
+    const sonEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+    if (radSec) radSec.classList.toggle("disabledSection", !radEnabled);
+    if (sonSec) sonSec.classList.toggle("disabledSection", !sonEnabled);
+
     updateSaveState();
 
     const host = document.getElementById("toastHost");
@@ -976,6 +1074,7 @@ def reset_radarr():
     cfg["RADARR_URL"] = ""
     cfg["RADARR_API_KEY"] = ""
     cfg["RADARR_OK"] = False
+    cfg["RADARR_ENABLED"] = False
     save_config(cfg)
     flash("Radarr settings cleared ✔", "success")
     return redirect("/settings")
@@ -987,6 +1086,7 @@ def reset_sonarr():
     cfg["SONARR_URL"] = ""
     cfg["SONARR_API_KEY"] = ""
     cfg["SONARR_OK"] = False
+    cfg["SONARR_ENABLED"] = False
     save_config(cfg)
     flash("Sonarr settings cleared ✔", "success")
     return redirect("/settings")
@@ -1024,6 +1124,7 @@ def test_radarr():
         cfg["RADARR_URL"] = url
         cfg["RADARR_API_KEY"] = api_key
         cfg["RADARR_OK"] = True
+        cfg["RADARR_ENABLED"] = True
         save_config(cfg)
 
         flash("Radarr connected ✔", "success")
@@ -1071,6 +1172,7 @@ def test_sonarr():
         cfg["SONARR_URL"] = url
         cfg["SONARR_API_KEY"] = api_key
         cfg["SONARR_OK"] = True
+        cfg["SONARR_ENABLED"] = True
         save_config(cfg)
 
         flash("Sonarr connected ✔", "success")
@@ -1092,6 +1194,8 @@ def settings():
 
     radarr_ok = bool(cfg.get("RADARR_OK"))
     sonarr_ok = bool(cfg.get("SONARR_OK"))
+    radarr_enabled = bool(cfg.get("RADARR_ENABLED", True))
+    sonarr_enabled = bool(cfg.get("SONARR_ENABLED", False))
 
     test_label = "Connected" if radarr_ok else "Test Connection"
     test_disabled_attr = "disabled" if radarr_ok else ""
@@ -1125,35 +1229,49 @@ def settings():
               <div class="card" style="box-shadow:none; margin-bottom:14px;">
                 <div class="hd"><h2>Radarr setup</h2></div>
                 <div class="bd">
-                  <div class="form">
-                    <div class="field">
-                      <label>Radarr URL</label>
-                      <input type="text" name="RADARR_URL"
-                             value="{safe_html(cfg["RADARR_URL"])}"
-                             data-initial="{safe_html(cfg["RADARR_URL"])}">
+
+                  <div class="toggleRow">
+                    <div>
+                      <div style="font-weight:800;">Enable Radarr</div>
+                      <div class="muted">Turn off to ignore Radarr features.</div>
                     </div>
-                    <div class="field">
-                      <label>Radarr API Key</label>
-                      <input type="password" name="RADARR_API_KEY"
-                             value="{safe_html(cfg["RADARR_API_KEY"])}"
-                             data-initial="{safe_html(cfg["RADARR_API_KEY"])}">
-                    </div>
+                    <label class="switch" title="Enable/Disable Radarr">
+                      <input id="radarr_enabled" name="RADARR_ENABLED" type="checkbox" {"checked" if radarr_enabled else ""}>
+                      <span class="slider"></span>
+                    </label>
                   </div>
 
-                  <div class="btnrow" style="margin-top:14px;">
-                    <button id="testRadarrBtn"
-                            class="btn good"
-                            type="submit"
-                            formaction="/test-radarr"
-                            formmethod="post"
-                            {test_disabled_attr}
-                            title="{safe_html(test_title)}">{safe_html(test_label)}</button>
+                  <div id="radarrSection">
+                    <div class="form">
+                      <div class="field">
+                        <label>Radarr URL</label>
+                        <input type="text" name="RADARR_URL"
+                               value="{safe_html(cfg["RADARR_URL"])}"
+                               data-initial="{safe_html(cfg["RADARR_URL"])}">
+                      </div>
+                      <div class="field">
+                        <label>Radarr API Key</label>
+                        <input type="password" name="RADARR_API_KEY"
+                               value="{safe_html(cfg["RADARR_API_KEY"])}"
+                               data-initial="{safe_html(cfg["RADARR_API_KEY"])}">
+                      </div>
+                    </div>
 
-                    <button class="btn bad"
-                            type="submit"
-                            formaction="/reset-radarr"
-                            formmethod="post"
-                            onclick="return confirm('Clear Radarr URL/API key?');">Reset Radarr</button>
+                    <div class="btnrow" style="margin-top:14px;">
+                      <button id="testRadarrBtn"
+                              class="btn good"
+                              type="submit"
+                              formaction="/test-radarr"
+                              formmethod="post"
+                              {test_disabled_attr}
+                              title="{safe_html(test_title)}">{safe_html(test_label)}</button>
+
+                      <button class="btn bad"
+                              type="submit"
+                              formaction="/reset-radarr"
+                              formmethod="post"
+                              onclick="return confirm('Clear Radarr URL/API key and disable Radarr?');">Reset Radarr</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1164,37 +1282,51 @@ def settings():
                   <div class="muted">Optional</div>
                 </div>
                 <div class="bd">
-                  <div class="form">
-                    <div class="field">
-                      <label>Sonarr URL</label>
-                      <input type="text" name="SONARR_URL"
-                             value="{safe_html(cfg["SONARR_URL"])}"
-                             data-initial="{safe_html(cfg["SONARR_URL"])}">
+
+                  <div class="toggleRow">
+                    <div>
+                      <div style="font-weight:800;">Enable Sonarr</div>
+                      <div class="muted">Turn on if you want Sonarr support.</div>
                     </div>
-                    <div class="field">
-                      <label>Sonarr API Key</label>
-                      <input type="password" name="SONARR_API_KEY"
-                             value="{safe_html(cfg["SONARR_API_KEY"])}"
-                             data-initial="{safe_html(cfg["SONARR_API_KEY"])}">
-                    </div>
+                    <label class="switch" title="Enable/Disable Sonarr">
+                      <input id="sonarr_enabled" name="SONARR_ENABLED" type="checkbox" {"checked" if sonarr_enabled else ""}>
+                      <span class="slider"></span>
+                    </label>
                   </div>
 
-                  <div class="btnrow" style="margin-top:14px;">
-                    <button id="testSonarrBtn"
-                            class="btn good"
-                            type="submit"
-                            formaction="/test-sonarr"
-                            formmethod="post"
-                            {sonarr_test_disabled_attr}
-                            title="{safe_html(sonarr_test_title)}">{safe_html(sonarr_test_label)}</button>
+                  <div id="sonarrSection">
+                    <div class="form">
+                      <div class="field">
+                        <label>Sonarr URL</label>
+                        <input type="text" name="SONARR_URL"
+                               value="{safe_html(cfg["SONARR_URL"])}"
+                               data-initial="{safe_html(cfg["SONARR_URL"])}">
+                      </div>
+                      <div class="field">
+                        <label>Sonarr API Key</label>
+                        <input type="password" name="SONARR_API_KEY"
+                               value="{safe_html(cfg["SONARR_API_KEY"])}"
+                               data-initial="{safe_html(cfg["SONARR_API_KEY"])}">
+                      </div>
+                    </div>
 
-                    <button class="btn bad"
-                            type="submit"
-                            formaction="/reset-sonarr"
-                            formmethod="post"
-                            onclick="return confirm('Clear Sonarr URL/API key?');">Reset Sonarr</button>
+                    <div class="btnrow" style="margin-top:14px;">
+                      <button id="testSonarrBtn"
+                              class="btn good"
+                              type="submit"
+                              formaction="/test-sonarr"
+                              formmethod="post"
+                              {sonarr_test_disabled_attr}
+                              title="{safe_html(sonarr_test_title)}">{safe_html(sonarr_test_label)}</button>
 
-                    <div class="muted">Leave blank if you don’t use Sonarr.</div>
+                      <button class="btn bad"
+                              type="submit"
+                              formaction="/reset-sonarr"
+                              formmethod="post"
+                              onclick="return confirm('Clear Sonarr URL/API key and disable Sonarr?');">Reset Sonarr</button>
+
+                      <div class="muted">Leave blank if you don’t use Sonarr.</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1241,6 +1373,10 @@ def save_settings():
     old = load_config()
     cfg = load_config()
 
+    # toggles
+    cfg["RADARR_ENABLED"] = checkbox("RADARR_ENABLED")
+    cfg["SONARR_ENABLED"] = checkbox("SONARR_ENABLED")
+
     cfg["RADARR_URL"] = (request.form.get("RADARR_URL") or "").rstrip("/")
     cfg["RADARR_API_KEY"] = request.form.get("RADARR_API_KEY") or ""
     cfg["SONARR_URL"] = (request.form.get("SONARR_URL") or "").rstrip("/")
@@ -1256,16 +1392,23 @@ def save_settings():
     if old.get("SONARR_URL") != cfg["SONARR_URL"] or old.get("SONARR_API_KEY") != cfg["SONARR_API_KEY"]:
         cfg["SONARR_OK"] = False
 
-    if not cfg.get("RADARR_OK", False):
-        flash("Please click Test Connection for Radarr and make sure it shows Connected before saving.", "error")
-        save_config(cfg)
-        return redirect("/settings")
+    # Validation respecting toggles
+    if cfg.get("RADARR_ENABLED", True):
+        if not cfg.get("RADARR_OK", False):
+            flash("Radarr enabled: click Test Connection and make sure it shows Connected before saving.", "error")
+            save_config(cfg)
+            return redirect("/settings")
+    else:
+        cfg["RADARR_OK"] = False
 
     sonarr_configured = bool((cfg.get("SONARR_URL") or "").strip() or (cfg.get("SONARR_API_KEY") or "").strip())
-    if sonarr_configured and not cfg.get("SONARR_OK", False):
-        flash("Please click Test Connection for Sonarr (or clear Sonarr fields) before saving.", "error")
-        save_config(cfg)
-        return redirect("/settings")
+    if cfg.get("SONARR_ENABLED", False):
+        if sonarr_configured and not cfg.get("SONARR_OK", False):
+            flash("Sonarr enabled: click Test Connection (or clear Sonarr fields) before saving.", "error")
+            save_config(cfg)
+            return redirect("/settings")
+    else:
+        cfg["SONARR_OK"] = False
 
     save_config(cfg)
     flash("Settings saved ✔", "success")
@@ -1276,9 +1419,8 @@ def save_settings():
 def jobs_page():
     cfg = load_config()
 
-    # Fetch Radarr tags for Tag Label dropdown
     labels = []
-    if cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK"):
+    if cfg.get("RADARR_ENABLED", True) and cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK"):
         try:
             tags = radarr_get(cfg, "/api/v3/tag")
             labels = sorted({t.get("label") for t in (tags or []) if t.get("label")}, key=lambda x: str(x).lower())
