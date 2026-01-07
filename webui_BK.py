@@ -112,11 +112,11 @@ SONARR_DELETE_MODES = [
 def sonarr_delete_mode_label(mode: str) -> str:
     mode = (mode or "").strip()
     if mode == "episodes_only":
-        return "Delete only episode files older than X days inside tagged series (keep series in Sonarr)"
+        return "Episodes only (keep Series in Sonarr)"
     if mode == "episodes_then_series_if_empty":
-        return "Delete episodes first; delete series only if no files remain in tagged series (remove series from Sonarr)"
+        return "Episodes, Series only if empty (remove Series from Sonarr)"
     if mode == "series_whole":
-        return "Delete whole series when older than X days in tagged (remove series from Sonarr)"
+        return "Whole Series (remove from Sonarr)"
     return mode or "episodes_only"
 
 
@@ -1759,9 +1759,9 @@ def jobs_page():
               <div class="field" id="sonarrDeleteModeField" style="display:none;">
                 <label>Sonarr Delete Mode</label>
                 <select name="SONARR_DELETE_MODE" id="job_sonarr_mode">
-                  <option value="episodes_only">Delete only episode files older than X days inside tagged series (keep series in Sonarr)</option>
-                  <option value="episodes_then_series_if_empty">Delete episodes first; delete series only if no files remain in tagged series (remove series from Sonarr)</option>
-                  <option value="series_whole">Delete whole series when older than X days in tagged (remove series from Sonarr)</option>
+                  <option value="episodes_only">Episodes only (keep Series in Sonarr)</option>
+                  <option value="episodes_then_series_if_empty">Episodes, Series only if empty (remove Series from Sonarr)</option>
+                  <option value="series_whole">Whole Series (remove from Sonarr)</option>
                 </select>
               </div>
 
