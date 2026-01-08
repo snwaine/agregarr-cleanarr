@@ -199,7 +199,6 @@ def find_job(cfg: Dict[str, Any], job_id: str) -> Optional[Dict[str, Any]]:
 
 
 def run_now_modal_html() -> str:
-    # Single shared Run Now modal used by Jobs + Preview pages.
     return """
     <div class="modalBack" id="runNowBack">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="runNowTitle">
@@ -237,12 +236,6 @@ def run_now_modal_html() -> str:
 
 
 def run_now_button_html(job: Dict[str, Any]) -> str:
-    """
-    Shared button behavior:
-    - Disabled if job disabled
-    - If DRY_RUN ON: normal post button (safe)
-    - If DRY_RUN OFF: show confirm modal
-    """
     job = normalize_job(job)
     if not job["enabled"]:
         return '<button class="btn" type="button" disabled title="Enable this job to run now">Run Now</button>'
@@ -823,12 +816,12 @@ BASE_HEAD = """
   .enableWrap{ display:flex; align-items:center; gap:10px; }
   .enableLbl{ font-size: 12px; color: var(--muted); white-space: nowrap; }
 
-  /* ✅ Job body 2-col: light meta, right action rail */
+  /* ✅ Job body 2-col: meta left, action rail right */
   .jobBody{
     padding: 12px 12px;
     background: var(--panel2);
     display: grid;
-    grid-template-columns: 80px 1fr;
+    grid-template-columns: 1fr 80px; /* requested */
     gap: 12px;
     align-items: start;
   }
@@ -842,17 +835,15 @@ BASE_HEAD = """
   }
   .jobRail .btn{
     width: 100%;
-    text-align: left;
-    justify-content: flex-start;
+    text-align: center;       /* rail is narrow now */
+    justify-content: center;  /* center content */
+    padding: 10px 8px;
   }
 
   .metaStack{ display:flex; flex-direction: column; gap: 6px; font-size: 13px; }
   .metaRow{ display:flex; align-items: baseline; gap: 10px; line-height: 1.35; }
   .metaLabel{ width: 130px; color: var(--muted); flex: 0 0 auto; }
   .metaVal{ color: var(--text); flex: 1 1 auto; min-width: 0; word-break: break-word; }
-
-  /* Old bottom action row (kept harmless, but no longer used for job cards) */
-  .jobActions{ margin-top: 0; display: block; }
 
   /* Modal */
   .modalBack{
@@ -955,7 +946,6 @@ BASE_HEAD = """
 </style>
 
 <script>
-  // ---------- small helpers ----------
   function $(id){ return document.getElementById(id); }
   function showModal(id){ const el = $(id); if (el) el.style.display = "flex"; }
   function hideModal(id){ const el = $(id); if (el) el.style.display = "none"; }
@@ -971,7 +961,6 @@ BASE_HEAD = """
       .replaceAll("'","&#39;");
   }
 
-  // ---------- modal close ----------
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       hideModal("runNowBack");
@@ -979,7 +968,6 @@ BASE_HEAD = """
     }
   });
 
-  // ---------- select option helper ----------
   function ensureSelectOption(selectId, value, labelSuffix){
     const sel = $(selectId);
     if (!sel) return;
@@ -995,7 +983,6 @@ BASE_HEAD = """
     sel.insertBefore(opt, sel.firstChild);
   }
 
-  // ---------- tags ----------
   function rebuildTagOptions(appKey, selectedValue){
     const sel = $("job_tag");
     if (!sel) return;
@@ -1015,7 +1002,6 @@ BASE_HEAD = """
     }
   }
 
-  // ---------- sonarr mode visibility ----------
   function updateSonarrModeVisibility(appKey){
     const wrap = $("sonarrDeleteModeField");
     const sel = $("job_sonarr_mode");
@@ -1031,7 +1017,6 @@ BASE_HEAD = """
     updateSonarrModeVisibility(appKey);
   }
 
-  // ---------- job modal open ----------
   function openNewJob(){
     const form = $("jobForm");
     if (!form) return;
@@ -1091,7 +1076,6 @@ BASE_HEAD = """
     showModal("jobBack");
   }
 
-  // ---------- Run Now confirm ----------
   function openRunNowConfirm(jobId, opts){
     opts = opts || {};
     const app = (opts.app || "radarr").toLowerCase();
@@ -1134,7 +1118,6 @@ BASE_HEAD = """
     if (form) form.submit();
   }
 
-  // ---------- Settings dirty / save enable ----------
   function isDirty(settingsForm){
     if (!settingsForm) return false;
     const els = settingsForm.querySelectorAll("input, select, textarea");
@@ -1228,7 +1211,6 @@ BASE_HEAD = """
     const host = $("toastHost");
     if (host) setTimeout(() => { try { host.remove(); } catch(e){} }, 6000);
 
-    // reopen job modal after validation error
     const params = new URLSearchParams(window.location.search);
     if (params.get("modal") === "job") {
       const jid = params.get("job_id") || "";
@@ -1771,7 +1753,6 @@ def jobs_page():
     </script>
     """
 
-    # ✅ Options generated from the same label helper (consistent everywhere)
     sonarr_mode_opts = "".join(
         f'<option value="{safe_html(k)}">{safe_html(sonarr_delete_mode_label(k))}</option>'
         for k in SONARR_DELETE_MODES
@@ -1910,7 +1891,6 @@ def jobs_page():
               </div>
             """
 
-        # ✅ left action rail: Run Now / Edit / Delete
         edit_btn = f"""
           <button class="btn"
                   type="button"
@@ -1963,12 +1943,7 @@ def jobs_page():
             </div>
 
             <div class="jobBody">
-              <div class="jobRail">
-                {run_now_button_html(j)}
-                {edit_btn}
-                {delete_btn}
-              </div>
-
+              <!-- meta LEFT -->
               <div class="metaStack">
                 <div class="metaRow">
                   <div class="metaLabel">App:</div>
@@ -2006,6 +1981,13 @@ def jobs_page():
                   <div class="metaLabel">Dry-run:</div>
                   <div class="metaVal"><b>{dry_val}</b></div>
                 </div>
+              </div>
+
+              <!-- rail RIGHT -->
+              <div class="jobRail">
+                {run_now_button_html(j)}
+                {edit_btn}
+                {delete_btn}
               </div>
             </div>
           </div>
