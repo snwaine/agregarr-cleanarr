@@ -823,12 +823,12 @@ BASE_HEAD = """
   .enableWrap{ display:flex; align-items:center; gap:10px; }
   .enableLbl{ font-size: 12px; color: var(--muted); white-space: nowrap; }
 
-  /* ✅ Job body 2-col: left action rail, right meta */
+  /* ✅ Job body 2-col: light meta, right action rail */
   .jobBody{
     padding: 12px 12px;
     background: var(--panel2);
     display: grid;
-    grid-template-columns: 140px 1fr;
+    grid-template-columns: 80px 1fr;
     gap: 12px;
     align-items: start;
   }
