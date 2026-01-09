@@ -600,6 +600,9 @@ BASE_HEAD = """
     flex: 1 1 auto;
     overflow: hidden;
     min-height: 0;         /* ✅ important for bd scrolling */
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    box-shadow: 0 12px 28px rgba(0,0,0,.28), inset 0 -1px 0 rgba(255,255,255,.04);
   }
 
   body[data-theme="dark"] { color-scheme: dark; }
@@ -611,7 +614,7 @@ BASE_HEAD = """
   .wrap{
     max-width: 1200px;
     margin: 0 auto;
-    padding: 22px 18px 36px;
+    padding: 22px 18px 0px;
     width: 100%;
     box-sizing: border-box;
     display: flex;
@@ -700,19 +703,24 @@ BASE_HEAD = """
   .muted{ color: var(--muted); }
 
   .btnrow{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
+  
   .btn{
     border: 1px solid var(--line2);
     background: var(--panel2);
     color: var(--text);
-    padding: 10px 12px;
-    border-radius: 12px;
-    cursor:pointer;
+
+    /* ↓ 25% smaller */
+    padding: 7px 9px;          /* was 10px 12px */
+    border-radius: 9px;        /* was 12px */
     font-weight: 600;
-    font-size: 13px;
+    font-size: 10px;           /* was 13px */
+    gap: 6px;                  /* was 8px */
+
+    cursor:pointer;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
   }
+
   a.btn:hover{ text-decoration: none; }
 
   .btn{
