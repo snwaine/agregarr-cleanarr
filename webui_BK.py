@@ -2,9 +2,10 @@ import os
 import json
 import signal
 import uuid
+from html import escape as html_escape
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import requests
 from flask import (
@@ -57,8 +58,9 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def safe_html(s: str) -> str:
-    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def safe_html(s: Any) -> str:
+    # Safe for both text and attributes (escapes quotes)
+    return html_escape(str(s or ""), quote=True)
 
 
 def make_job_id() -> str:
@@ -102,22 +104,39 @@ def schedule_label(day_key: str, hour: int) -> str:
     return f"{day_txt} • {h:02d}:00"
 
 
+def parse_iso_date(s: str):
+    if not s:
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+# --------------------------
+# Sonarr delete mode labels (single source of truth)
+# --------------------------
 SONARR_DELETE_MODES = [
     "episodes_only",
     "episodes_then_series_if_empty",
     "series_whole",
 ]
 
+SONARR_DELETE_MODE_LABELS = {
+    "episodes_only": "Episodes only",
+    "episodes_then_series_if_empty": "Episodes → remove empty series",
+    "series_whole": "Whole series",
+}
+
 
 def sonarr_delete_mode_label(mode: str) -> str:
     mode = (mode or "").strip()
-    if mode == "episodes_only":
-        return "Episodes only (keep Series in Sonarr)"
-    if mode == "episodes_then_series_if_empty":
-        return "Episodes, Series only if empty (remove Series from Sonarr)"
-    if mode == "series_whole":
-        return "Whole Series (remove from Sonarr)"
-    return mode or "episodes_only"
+    return SONARR_DELETE_MODE_LABELS.get(mode, SONARR_DELETE_MODE_LABELS["episodes_only"])
 
 
 def job_defaults() -> Dict[str, Any]:
@@ -133,7 +152,6 @@ def job_defaults() -> Dict[str, Any]:
         "DRY_RUN": True,
         "DELETE_FILES": True,
         "ADD_IMPORT_EXCLUSION": False,
-        # Sonarr-specific:
         "SONARR_DELETE_MODE": "episodes_only",
     }
 
@@ -170,6 +188,82 @@ def normalize_job(j: Dict[str, Any]) -> Dict[str, Any]:
     return d
 
 
+def find_job(cfg: Dict[str, Any], job_id: str) -> Optional[Dict[str, Any]]:
+    job_id = str(job_id or "").strip()
+    if not job_id:
+        return None
+    for j in (cfg.get("JOBS") or []):
+        if str(j.get("id")) == job_id:
+            return normalize_job(j)
+    return None
+
+
+def run_now_modal_html() -> str:
+    return """
+    <div class="modalBack" id="runNowBack">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="runNowTitle">
+        <div class="mh">
+          <h3 id="runNowTitle">Run Now confirmation</h3>
+        </div>
+        <div class="mb">
+          <div style="margin-bottom:10px;">
+            <div class="muted">App: <b><span id="rn_app">Radarr</span></b></div>
+            <div class="muted">Dry Run: <b><span id="rn_dry">OFF</span></b> • Delete Files: <b><span id="rn_del">ON</span></b> • Job: <b><span id="rn_enabled">Enabled</span></b></div>
+          </div>
+
+          <p><b id="rn_msg">Dry Run is OFF — this will perform real actions.</b></p>
+
+          <p id="rn_hint_delete" class="muted">
+            With <b>Delete Files</b> enabled, it may delete files from disk via the app.
+          </p>
+
+          <p id="rn_hint_no_delete" class="muted" style="display:none;">
+            With <b>Delete Files</b> disabled, it should avoid deleting from disk.
+          </p>
+
+          <p class="muted">If you’re not sure, edit the job and enable <b>Dry Run</b>, then use Preview.</p>
+        </div>
+        <div class="mf">
+          <button class="btn" type="button" onclick="hideModal('runNowBack')">Cancel</button>
+          <form id="runNowFormConfirm" method="post" action="/jobs/run-now" style="margin:0;">
+            <input type="hidden" id="runNowJobId" name="job_id" value="">
+            <button class="btn bad" type="button" onclick="runNowSubmitConfirm()">Yes, run now</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    """
+
+
+def run_now_button_html(job: Dict[str, Any]) -> str:
+    job = normalize_job(job)
+    if not job["enabled"]:
+        return '<button class="btn" type="button" disabled title="Enable this job to run now">Run Now</button>'
+
+    jid = safe_html(job["id"])
+    app_key = safe_html(job.get("APP", "radarr"))
+    delete_files = str(bool(job.get("DELETE_FILES", True))).lower()
+    enabled = str(bool(job.get("enabled", True))).lower()
+
+    if job.get("DRY_RUN", True):
+        return f"""
+          <form method="post" action="/jobs/run-now" style="margin:0;">
+            <input type="hidden" name="job_id" value="{jid}">
+            <button class="btn good" type="submit">Run Now</button>
+          </form>
+        """
+
+    return f"""
+      <button class="btn bad" type="button"
+        onclick="openRunNowConfirm('{jid}', {{
+          app: '{app_key}',
+          dryRun: false,
+          deleteFiles: {delete_files},
+          enabled: {enabled}
+        }})">Run Now</button>
+    """
+
+
 # --------------------------
 # Config / State
 # --------------------------
@@ -201,6 +295,7 @@ def load_config() -> Dict[str, Any]:
 
     t = (cfg.get("UI_THEME") or "dark").lower()
     cfg["UI_THEME"] = t if t in ("dark", "light") else "dark"
+
     cfg["RADARR_OK"] = bool(cfg.get("RADARR_OK", False))
     cfg["SONARR_OK"] = bool(cfg.get("SONARR_OK", False))
     cfg["RADARR_ENABLED"] = bool(cfg.get("RADARR_ENABLED", True))
@@ -211,13 +306,12 @@ def load_config() -> Dict[str, Any]:
     if not isinstance(jobs, list):
         jobs = []
     jobs = [normalize_job(j) for j in jobs]
-
     if not jobs:
         j = job_defaults()
         j["name"] = "Default Job"
         jobs = [normalize_job(j)]
-
     cfg["JOBS"] = jobs
+
     cfg["RADARR_URL"] = (cfg.get("RADARR_URL") or "").rstrip("/")
     cfg["RADARR_API_KEY"] = cfg.get("RADARR_API_KEY") or ""
     cfg["SONARR_URL"] = (cfg.get("SONARR_URL") or "").rstrip("/")
@@ -237,6 +331,15 @@ def load_state() -> Dict[str, Any]:
     except Exception:
         pass
     return {}
+
+
+def is_app_ready(cfg: Dict[str, Any], app_key: str) -> bool:
+    app_key = (app_key or "").lower()
+    if app_key == "radarr":
+        return bool(cfg.get("RADARR_ENABLED", True) and cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK"))
+    if app_key == "sonarr":
+        return bool(cfg.get("SONARR_ENABLED", False) and cfg.get("SONARR_URL") and cfg.get("SONARR_API_KEY") and cfg.get("SONARR_OK"))
+    return False
 
 
 # --------------------------
@@ -261,64 +364,41 @@ def logo_mime(p: Path) -> str:
 
 
 # --------------------------
-# Radarr helpers
+# API helpers
 # --------------------------
-def radarr_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
-    return {"X-Api-Key": cfg.get("RADARR_API_KEY", "")}
+def api_get(base_url: str, api_key: str, timeout_s: int, path: str):
+    url = (base_url or "").rstrip("/") + path
+    r = requests.get(url, headers={"X-Api-Key": api_key or ""}, timeout=timeout_s)
+    r.raise_for_status()
+    return r.json()
 
 
 def radarr_get(cfg: Dict[str, Any], path: str):
-    url = cfg["RADARR_URL"].rstrip("/") + path
-    r = requests.get(url, headers=radarr_headers(cfg), timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)))
-    r.raise_for_status()
-    return r.json()
-
-
-# --------------------------
-# Sonarr helpers
-# --------------------------
-def sonarr_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
-    return {"X-Api-Key": cfg.get("SONARR_API_KEY", "")}
+    return api_get(cfg["RADARR_URL"], cfg["RADARR_API_KEY"], int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)), path)
 
 
 def sonarr_get(cfg: Dict[str, Any], path: str):
-    url = cfg["SONARR_URL"].rstrip("/") + path
-    r = requests.get(url, headers=sonarr_headers(cfg), timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)))
-    r.raise_for_status()
-    return r.json()
+    return api_get(cfg["SONARR_URL"], cfg["SONARR_API_KEY"], int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)), path)
 
 
-def parse_iso_date(s: str):
-    if not s:
-        return None
-    try:
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        dt = datetime.fromisoformat(s)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-
-
-def get_tag_labels(cfg: Dict[str, Any], app_key: str):
+def get_tag_labels(cfg: Dict[str, Any], app_key: str) -> List[str]:
     app_key = (app_key or "").lower()
+    if not is_app_ready(cfg, app_key):
+        return []
+
     if app_key == "radarr":
-        if not (cfg.get("RADARR_ENABLED", True) and cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK")):
-            return []
         tags = radarr_get(cfg, "/api/v3/tag")
     elif app_key == "sonarr":
-        if not (cfg.get("SONARR_ENABLED", False) and cfg.get("SONARR_URL") and cfg.get("SONARR_API_KEY") and cfg.get("SONARR_OK")):
-            return []
         tags = sonarr_get(cfg, "/api/v3/tag")
     else:
         return []
 
-    labels = sorted({t.get("label") for t in (tags or []) if t.get("label")}, key=lambda x: str(x).lower())
-    return labels
+    return sorted({t.get("label") for t in (tags or []) if t.get("label")}, key=lambda x: str(x).lower())
 
 
+# --------------------------
+# Preview helpers
+# --------------------------
 def preview_candidates_radarr(cfg: Dict[str, Any], job: Dict[str, Any]):
     if not cfg.get("RADARR_ENABLED", True):
         return {"error": "Radarr is disabled in Settings.", "candidates": [], "cutoff": ""}
@@ -414,12 +494,10 @@ def render_toasts() -> str:
     msgs = get_flashed_messages(with_categories=True)
     if not msgs:
         return ""
-
     items = []
     for cat, msg in msgs:
         t = "ok" if cat == "success" else "err"
         items.append(f'<div class="toast {t}">{safe_html(msg)}</div>')
-
     return f'<div id="toastHost" class="toastHost">{"".join(items)}</div>'
 
 
@@ -431,7 +509,6 @@ BASE_HEAD = """
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root{
-    /* Lighter dark theme */
     --bg:#111827;
     --panel:#1f2937;
     --panel2:#1b2431;
@@ -465,14 +542,10 @@ BASE_HEAD = """
     --shadow: 0 12px 30px rgba(0,0,0,.08);
   }
 
-  * { box-sizing: border-box; }
-  html, body { height: 100%; }
-
   body{
     min-height: 100vh;
     margin:0;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
-    /* Green gradient that matches the logo */
     background:
       radial-gradient(900px 520px at 18% 8%, rgba(34,197,94,.22), transparent 62%),
       radial-gradient(880px 520px at 92% 10%, rgba(22,163,74,.16), transparent 60%),
@@ -565,16 +638,6 @@ BASE_HEAD = """
   .card .bd{ padding: 14px 16px; background: var(--panel); }
 
   .muted{ color: var(--muted); }
-  code{
-    background: var(--panel2);
-    border: 1px solid var(--line2);
-    padding: 2px 7px;
-    border-radius: 10px;
-    color: #dbeafe;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
-    font-size: 12px;
-  }
-  [data-theme="light"] code{ color: #1e40af; }
 
   .btnrow{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
   .btn{
@@ -586,8 +649,29 @@ BASE_HEAD = """
     cursor:pointer;
     font-weight: 600;
     font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
-  .btn:hover{ border-color: rgba(34,197,94,.45); }
+  /* Buttons should never underline on hover */
+  a.btn:hover{ text-decoration: none; }
+
+  /* Subtle hover glow for all buttons */
+  .btn{
+    transition: box-shadow .18s ease, border-color .18s ease, transform .18s ease, filter .18s ease;
+  }
+
+  .btn:hover{
+    border-color: rgba(34,197,94,.55);
+    box-shadow: 0 0 0 3px rgba(34,197,94,.10), 0 10px 22px rgba(0,0,0,.22);
+    transform: translateY(-1px);
+  }
+
+  .btn:active{
+    transform: translateY(0);
+    box-shadow: 0 0 0 2px rgba(34,197,94,.08), 0 6px 14px rgba(0,0,0,.18);
+  }
+
   .btn:disabled{
     opacity: .45;
     cursor: not-allowed;
@@ -613,7 +697,6 @@ BASE_HEAD = """
   .form{ display:grid; grid-template-columns: 1fr; gap: 12px; }
   @media(min-width: 900px){ .form{ grid-template-columns: 1fr 1fr; } }
 
-  /* OPAQUE fields/menus */
   .field{
     border: 1px solid var(--line);
     border-radius: 14px;
@@ -634,19 +717,14 @@ BASE_HEAD = """
     border-radius: 12px;
     outline: none;
   }
-  [data-theme="light"] .field input, [data-theme="light"] .field select{
-    background: #ffffff;
-  }
+  [data-theme="light"] .field input, [data-theme="light"] .field select{ background: #ffffff; }
 
   .field select{
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
-
-    background: var(--panel);
     padding-right: 36px;
     cursor: pointer;
-
     background-image:
       linear-gradient(45deg, transparent 50%, var(--muted) 50%),
       linear-gradient(135deg, var(--muted) 50%, transparent 50%);
@@ -656,16 +734,9 @@ BASE_HEAD = """
     background-size: 6px 6px, 6px 6px;
     background-repeat: no-repeat;
   }
-  [data-theme="light"] .field select{ background: #ffffff; }
 
-  body[data-theme="dark"] .field select option{
-    background-color: #1f2937;
-    color: #f1f5f9;
-  }
-  body[data-theme="light"] .field select option{
-    background-color: #ffffff;
-    color: #0b1220;
-  }
+  body[data-theme="dark"] .field select option{ background-color: #1f2937; color: #f1f5f9; }
+  body[data-theme="light"] .field select option{ background-color: #ffffff; color: #0b1220; }
 
   .field input:focus, .field select:focus{
     border-color: rgba(34,197,94,.55);
@@ -683,7 +754,6 @@ BASE_HEAD = """
   [data-theme="light"] .check{ background: #ffffff; }
   .check input{ transform: scale(1.2); }
 
-  /* Toggle switch */
   .toggleRow{
     display:flex;
     align-items:center;
@@ -697,34 +767,19 @@ BASE_HEAD = """
   }
   [data-theme="light"] .toggleRow{ background: #ffffff; }
 
-  .switch{
-    position: relative;
-    width: 52px;
-    height: 30px;
-    display: inline-block;
-    flex: 0 0 auto;
-  }
-  .switch input{
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
+  .switch{ position: relative; width: 52px; height: 30px; display: inline-block; flex: 0 0 auto; }
+  .switch input{ opacity: 0; width: 0; height: 0; }
   .slider{
-    position:absolute;
-    cursor:pointer;
-    inset:0;
+    position:absolute; cursor:pointer; inset:0;
     background: rgba(255,255,255,.10);
     border: 1px solid var(--line2);
     transition: .18s ease;
     border-radius: 999px;
   }
   .slider:before{
-    position:absolute;
-    content:"";
-    height: 22px;
-    width: 22px;
-    left: 4px;
-    top: 50%;
+    position:absolute; content:"";
+    height: 22px; width: 22px;
+    left: 4px; top: 50%;
     transform: translateY(-50%);
     background: rgba(255,255,255,.85);
     border-radius: 999px;
@@ -735,83 +790,75 @@ BASE_HEAD = """
     background: linear-gradient(135deg, rgba(34,197,94,.60), rgba(22,163,74,.35));
     border-color: rgba(34,197,94,.55);
   }
-  .switch input:checked + .slider:before{
-    transform: translate(22px, -50%);
-    background: rgba(255,255,255,.92);
-  }
+  .switch input:checked + .slider:before{ transform: translate(22px, -50%); background: rgba(255,255,255,.92); }
 
-  /* Small switch (job cards / preview header) */
-  .switch.sm{ width: 46px; height: 26px; }
-  .switch.sm .slider:before{ width: 18px; height: 18px; left: 4px; }
-  .switch.sm input:checked + .slider:before{ transform: translate(18px, -50%); }
+  .disabledSection{ opacity: .55; filter: grayscale(.12); pointer-events: none; }
 
-  /* Disabled section look */
-  .disabledSection{
-    opacity: .55;
-    filter: grayscale(.12);
-    pointer-events: none;
-  }
-
-  /* Jobs cards */
   .jobsGrid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
-
   .jobCard{
-    grid-column: span 12; /* mobile default */
+    grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
     background: var(--panel2);
     overflow:hidden;
   }
+  @media(min-width: 900px){ .jobCard{ grid-column: span 6; } }
   [data-theme="light"] .jobCard{ background: #ffffff; }
 
-  /* Desktop: 2 jobs per row */
-  @media (min-width: 900px){
-    .jobCard{ grid-column: span 6; }
-  }
-
-  .jobTop{
+  .jobHeader{
     padding: 12px 12px;
     border-bottom: 1px solid var(--line);
-    display:flex;
-    align-items:flex-start;
-    justify-content: space-between;
-    gap: 12px;
     background: var(--panel2);
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
   }
-  [data-theme="light"] .jobTop{ background: #f3f4f6; }
-  .jobName{ font-weight: 800; letter-spacing:.2px; }
-  .jobMeta{ margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.55; }
-  .jobBody{
-    padding: 12px 12px;
-    display:flex;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    align-items:center;
-    background: var(--panel2);
-  }
-  [data-theme="light"] .jobBody{ background: #ffffff; }
-  .tagPill{
-    border: 1px solid var(--line2);
-    border-radius: 999px;
-    padding: 6px 10px;
-    font-size: 12px;
-    color: var(--text);
-    background: var(--panel);
+  [data-theme="light"] .jobHeader{ background: #f3f4f6; }
+
+  .jobHeaderLeft{ justify-self: start; min-width: 0; }
+  .jobHeaderCenter{ justify-self: center; }
+  .jobHeaderRight{ justify-self: end; display:flex; align-items:center; gap:10px; }
+
+  .jobName{
+    font-weight: 900;
+    letter-spacing: .2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  table{ width:100%; border-collapse: collapse; overflow:hidden; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); }
-  th, td{ padding: 10px 10px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
-  th{
-    text-align:left;
-    color:#e5e7eb;
+  .enableWrap{ display:flex; align-items:center; gap:10px; }
+  .enableLbl{ font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+  /* ✅ Job body 2-col: meta left, action rail right */
+  .jobBody{
+    padding: 12px 12px;
     background: var(--panel2);
-    position: sticky;
-    top: 0;
+    display: grid;
+    grid-template-columns: 1fr 80px; /* requested */
+    gap: 12px;
+    align-items: start;
   }
-  [data-theme="light"] th{ color:#111827; background: #f3f4f6; }
-  tr:hover td{ background: rgba(255,255,255,.03); }
-  .tablewrap{ max-height: 420px; overflow:auto; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); }
+  [data-theme="light"] .jobBody{ background: #ffffff; }
+
+  .jobRail{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-self: start;
+  }
+  .jobRail .btn{
+    width: 100%;
+    text-align: center;       /* rail is narrow now */
+    justify-content: center;  /* center content */
+    padding: 10px 8px;
+  }
+
+  .metaStack{ display:flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .metaRow{ display:flex; align-items: baseline; gap: 10px; line-height: 1.35; }
+  .metaLabel{ width: 130px; color: var(--muted); flex: 0 0 auto; }
+  .metaVal{ color: var(--text); flex: 1 1 auto; min-width: 0; word-break: break-word; }
 
   /* Modal */
   .modalBack{
@@ -849,7 +896,6 @@ BASE_HEAD = """
   [data-theme="light"] .modal .mh{ background: #f3f4f6; }
   .modal .mh h3{ margin:0; font-size: 14px; letter-spacing: .2px; }
 
-  /* ✅ CRITICAL FIX: form must be flex column for footer to stay visible and body to scroll */
   .modal form{
     display:flex;
     flex-direction: column;
@@ -860,9 +906,9 @@ BASE_HEAD = """
   .modal .mb{
     padding: 14px 16px;
     background: var(--panel);
-    overflow: auto;               /* scrollable content */
+    overflow: auto;
     flex: 1 1 auto;
-    min-height: 0;                /* critical for nested scrolling */
+    min-height: 0;
     -webkit-overflow-scrolling: touch;
   }
   .modal .mf{
@@ -875,6 +921,12 @@ BASE_HEAD = """
     flex: 0 0 auto;
   }
   [data-theme="light"] .modal .mf{ background: #f3f4f6; }
+
+  table{ width:100%; border-collapse: collapse; overflow:hidden; border-radius: 14px; border: 1px solid var(--line); }
+  th, td{ padding: 10px 10px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
+  th{ text-align:left; color:#cbd5e1; background: rgba(255,255,255,.04); position: sticky; top: 0; }
+  [data-theme="light"] th{ color:#111827; background: rgba(0,0,0,.03); }
+  .tablewrap{ max-height: 420px; overflow:auto; border-radius: 14px; border: 1px solid var(--line); }
 
   /* Toasts */
   .toastHost{
@@ -909,13 +961,19 @@ BASE_HEAD = """
 </style>
 
 <script>
-  function showModal(id) {
-    const back = document.getElementById(id);
-    if (back) back.style.display = "flex";
-  }
-  function hideModal(id) {
-    const back = document.getElementById(id);
-    if (back) back.style.display = "none";
+  function $(id){ return document.getElementById(id); }
+  function showModal(id){ const el = $(id); if (el) el.style.display = "flex"; }
+  function hideModal(id){ const el = $(id); if (el) el.style.display = "none"; }
+  function setVal(id, v){ const el = $(id); if (el) el.value = v; }
+  function setChecked(id, v){ const el = $(id); if (el) el.checked = !!v; }
+
+  function escHtml(s){
+    return (s ?? "").toString()
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
   }
 
   document.addEventListener("keydown", (e) => {
@@ -925,104 +983,85 @@ BASE_HEAD = """
     }
   });
 
-  function setVal(id, v) {
-    const el = document.getElementById(id);
-    if (el) el.value = v;
-  }
-  function setChecked(id, v) {
-    const el = document.getElementById(id);
-    if (el) el.checked = !!v;
-  }
-
-  function ensureSelectOption(selectId, value) {
-    const sel = document.getElementById(selectId);
+  function ensureSelectOption(selectId, value, labelSuffix){
+    const sel = $(selectId);
     if (!sel) return;
     const v = (value ?? "").toString();
     if (!v) return;
 
-    for (const opt of sel.options) {
+    for (const opt of sel.options){
       if (opt.value === v) return;
     }
-
     const opt = document.createElement("option");
     opt.value = v;
-    opt.textContent = v + " (missing)";
+    opt.textContent = v + (labelSuffix || "");
     sel.insertBefore(opt, sel.firstChild);
   }
 
-  function rebuildTagOptions(appKey, selectedValue) {
-    const sel = document.getElementById("job_tag");
+  function rebuildTagOptions(appKey, selectedValue){
+    const sel = $("job_tag");
     if (!sel) return;
 
     const tags = (window.__TAGS && window.__TAGS[appKey]) ? window.__TAGS[appKey] : [];
-    const base = ['<option value="" selected disabled>-- Select a tag --</option>'];
+    const out = ['<option value="" selected disabled>-- Select a tag --</option>'];
 
-    for (const t of tags) {
-      const esc = (t || "")
-        .replaceAll("&","&amp;")
-        .replaceAll("<","&lt;")
-        .replaceAll(">","&gt;")
-        .replaceAll('"',"&quot;");
-      base.push(`<option value="${esc}">${esc}</option>`);
+    for (const t of tags){
+      const esc = escHtml(t || "");
+      out.push(`<option value="${esc}">${esc}</option>`);
     }
 
-    sel.innerHTML = base.join("");
-    if (selectedValue) {
-      ensureSelectOption("job_tag", selectedValue);
+    sel.innerHTML = out.join("");
+    if (selectedValue){
+      ensureSelectOption("job_tag", selectedValue, " (missing)");
       setVal("job_tag", selectedValue);
     }
   }
 
-  function updateSonarrModeVisibility(appKey) {
-    const wrap = document.getElementById("sonarrDeleteModeField");
-    const sel = document.getElementById("job_sonarr_mode");
+  function updateSonarrModeVisibility(appKey){
+    const wrap = $("sonarrDeleteModeField");
+    const sel = $("job_sonarr_mode");
     const isSonarr = (appKey || "radarr") === "sonarr";
-
     if (wrap) wrap.style.display = isSonarr ? "" : "none";
-    if (sel) sel.disabled = !isSonarr;  // don't submit when not Sonarr
+    if (sel) sel.disabled = !isSonarr;
   }
 
-  function onJobAppChanged() {
-    const appSel = document.getElementById("job_app");
+  function onJobAppChanged(){
+    const appSel = $("job_app");
     const appKey = appSel ? (appSel.value || "radarr") : "radarr";
     rebuildTagOptions(appKey, "");
     updateSonarrModeVisibility(appKey);
   }
 
-  function openNewJob() {
-    const form = document.getElementById("jobForm");
+  function openNewJob(){
+    const form = $("jobForm");
     if (!form) return;
 
     form.action = "/jobs/save";
     setVal("job_id", "");
     setVal("job_name", "New Job");
 
-    const appSel = document.getElementById("job_app");
+    const appSel = $("job_app");
     const defApp = appSel?.getAttribute("data-default-app") || "radarr";
     setVal("job_app", defApp);
     rebuildTagOptions(defApp, "");
     updateSonarrModeVisibility(defApp);
 
-    // Sonarr mode default
     setVal("job_sonarr_mode", "episodes_only");
-
     setVal("job_days", "30");
     setVal("job_day", "daily");
     setVal("job_hour", "3");
     setChecked("job_dry", true);
     setChecked("job_delete", true);
     setChecked("job_excl", false);
-
-    // enabled moved to last field
     setVal("job_enabled", "1");
 
-    const t = document.getElementById("jobTitle");
+    const t = $("jobTitle");
     if (t) t.textContent = "Add Job";
     showModal("jobBack");
   }
 
-  function openEditJob(btn) {
-    const form = document.getElementById("jobForm");
+  function openEditJob(btn){
+    const form = $("jobForm");
     if (!form || !btn) return;
 
     form.action = "/jobs/save";
@@ -1045,79 +1084,59 @@ BASE_HEAD = """
     setChecked("job_dry", (btn.getAttribute("data-dry") || "1") === "1");
     setChecked("job_delete", (btn.getAttribute("data-del") || "1") === "1");
     setChecked("job_excl", (btn.getAttribute("data-excl") || "0") === "1");
-
-    // enabled moved to last field
     setVal("job_enabled", (btn.getAttribute("data-enabled") || "1"));
 
-    const t = document.getElementById("jobTitle");
+    const t = $("jobTitle");
     if (t) t.textContent = "Edit Job";
     showModal("jobBack");
   }
 
-  // ✅ Dynamic Run Now confirmation (now includes more flags)
-  function openRunNowConfirm(jobId, opts) {
+  function openRunNowConfirm(jobId, opts){
     opts = opts || {};
     const app = (opts.app || "radarr").toLowerCase();
     const dryRun = !!opts.dryRun;
     const deleteFiles = !!opts.deleteFiles;
     const enabled = (opts.enabled === undefined) ? true : !!opts.enabled;
-    const importExcl = !!opts.addImportExclusion;
-    const sonarrMode = (opts.sonarrDeleteMode || "").toString();
 
-    const hid = document.getElementById("runNowJobId");
+    const hid = $("runNowJobId");
     if (hid) hid.value = jobId || "";
 
-    const elApp = document.getElementById("rn_app");
-    const elDry = document.getElementById("rn_dry");
-    const elDel = document.getElementById("rn_del");
-    const elEnabled = document.getElementById("rn_enabled");
-    const elExcl = document.getElementById("rn_excl");
-    const elSonMode = document.getElementById("rn_sonmode");
-    const sonWrap = document.getElementById("rn_son_wrap");
+    const elApp = $("rn_app");
+    const elDry = $("rn_dry");
+    const elDel = $("rn_del");
+    const elEnabled = $("rn_enabled");
 
     if (elApp) elApp.textContent = (app === "sonarr") ? "Sonarr" : "Radarr";
     if (elDry) elDry.textContent = dryRun ? "ON" : "OFF";
     if (elDel) elDel.textContent = deleteFiles ? "ON" : "OFF";
     if (elEnabled) elEnabled.textContent = enabled ? "Enabled" : "Disabled";
-    if (elExcl) elExcl.textContent = importExcl ? "ON" : "OFF";
 
-    if (sonWrap) sonWrap.style.display = (app === "sonarr" && sonarrMode) ? "" : "none";
-    if (elSonMode) elSonMode.textContent = sonarrMode || "";
-
-    const msg = document.getElementById("rn_msg");
-    if (msg) {
+    const msg = $("rn_msg");
+    if (msg){
       const parts = [];
-      if (!enabled) parts.push("This job is currently disabled — enable it to run.");
+      if (!enabled) parts.push("This job is currently disabled — running now will still execute it.");
       if (!dryRun) parts.push("Dry Run is OFF — this will perform real actions.");
-      else parts.push("Dry Run is ON — this should only log changes.");
-      if (deleteFiles) parts.push("Delete Files is ON — files may be removed from disk.");
-      else parts.push("Delete Files is OFF — it should avoid disk deletes.");
-      if (importExcl) parts.push("Import Exclusion is ON — it may add exclusions to prevent re-import.");
-      else parts.push("Import Exclusion is OFF — it will not add exclusions.");
+      parts.push(deleteFiles ? "Delete Files is ON — files may be removed from disk." : "Delete Files is OFF — it should avoid disk deletes.");
       msg.textContent = parts.join(" ");
     }
 
-    const hintDelete = document.getElementById("rn_hint_delete");
-    const hintNoDelete = document.getElementById("rn_hint_no_delete");
+    const hintDelete = $("rn_hint_delete");
+    const hintNoDelete = $("rn_hint_no_delete");
     if (hintDelete) hintDelete.style.display = deleteFiles ? "" : "none";
     if (hintNoDelete) hintNoDelete.style.display = deleteFiles ? "none" : "";
-
-    // safety: if somehow opened while disabled, hide the confirm button
-    const confirmBtn = document.getElementById("rn_confirm_btn");
-    if (confirmBtn) confirmBtn.disabled = !enabled;
 
     showModal("runNowBack");
   }
 
-  function runNowSubmitConfirm() {
-    const form = document.getElementById("runNowFormConfirm");
+  function runNowSubmitConfirm(){
+    const form = $("runNowFormConfirm");
     if (form) form.submit();
   }
 
-  function isDirty(settingsForm) {
+  function isDirty(settingsForm){
     if (!settingsForm) return false;
     const els = settingsForm.querySelectorAll("input, select, textarea");
-    for (const el of els) {
+    for (const el of els){
       const init = el.getAttribute("data-initial");
       if (init === null) continue;
 
@@ -1130,17 +1149,17 @@ BASE_HEAD = """
     return false;
   }
 
-  function updateSaveState() {
-    const settingsForm = document.getElementById("settingsForm");
-    const saveBtn = document.getElementById("saveSettingsBtn");
+  function updateSaveState(){
+    const settingsForm = $("settingsForm");
+    const saveBtn = $("saveSettingsBtn");
     if (!settingsForm || !saveBtn) return;
 
     const radarrOk = settingsForm.getAttribute("data-radarr-ok") === "1";
     const sonarrOk = settingsForm.getAttribute("data-sonarr-ok") === "1";
     const dirty = isDirty(settingsForm);
 
-    const radarrEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
-    const sonarrEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+    const radarrEnabled = $("radarr_enabled")?.checked ?? true;
+    const sonarrEnabled = $("sonarr_enabled")?.checked ?? false;
 
     const sonarrUrl = (document.querySelector('input[name="SONARR_URL"]')?.value || "").trim();
     const sonarrKey = (document.querySelector('input[name="SONARR_API_KEY"]')?.value || "").trim();
@@ -1156,13 +1175,13 @@ BASE_HEAD = """
     else saveBtn.title = dirty ? "Save settings" : "No changes to save";
   }
 
-  function onSettingsEdited(e) {
-    const settingsForm = document.getElementById("settingsForm");
+  function onSettingsEdited(e){
+    const settingsForm = $("settingsForm");
     if (!settingsForm) return;
 
     if (e.target && (e.target.name === "RADARR_URL" || e.target.name === "RADARR_API_KEY")) {
       settingsForm.setAttribute("data-radarr-ok", "0");
-      const testBtn = document.getElementById("testRadarrBtn");
+      const testBtn = $("testRadarrBtn");
       if (testBtn) {
         testBtn.disabled = false;
         testBtn.title = "Test Radarr connection";
@@ -1172,7 +1191,7 @@ BASE_HEAD = """
 
     if (e.target && (e.target.name === "SONARR_URL" || e.target.name === "SONARR_API_KEY")) {
       settingsForm.setAttribute("data-sonarr-ok", "0");
-      const testBtn = document.getElementById("testSonarrBtn");
+      const testBtn = $("testSonarrBtn");
       if (testBtn) {
         testBtn.disabled = false;
         testBtn.title = "Test Sonarr connection";
@@ -1180,10 +1199,10 @@ BASE_HEAD = """
       }
     }
 
-    const radSec = document.getElementById("radarrSection");
-    const sonSec = document.getElementById("sonarrSection");
-    const radEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
-    const sonEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+    const radSec = $("radarrSection");
+    const sonSec = $("sonarrSection");
+    const radEnabled = $("radarr_enabled")?.checked ?? true;
+    const sonEnabled = $("sonarr_enabled")?.checked ?? false;
 
     if (radSec) radSec.classList.toggle("disabledSection", !radEnabled);
     if (sonSec) sonSec.classList.toggle("disabledSection", !sonEnabled);
@@ -1195,16 +1214,16 @@ BASE_HEAD = """
   document.addEventListener("change", onSettingsEdited);
 
   document.addEventListener("DOMContentLoaded", () => {
-    const radSec = document.getElementById("radarrSection");
-    const sonSec = document.getElementById("sonarrSection");
-    const radEnabled = document.getElementById("radarr_enabled")?.checked ?? true;
-    const sonEnabled = document.getElementById("sonarr_enabled")?.checked ?? false;
+    const radSec = $("radarrSection");
+    const sonSec = $("sonarrSection");
+    const radEnabled = $("radarr_enabled")?.checked ?? true;
+    const sonEnabled = $("sonarr_enabled")?.checked ?? false;
     if (radSec) radSec.classList.toggle("disabledSection", !radEnabled);
     if (sonSec) sonSec.classList.toggle("disabledSection", !sonEnabled);
 
     updateSaveState();
 
-    const host = document.getElementById("toastHost");
+    const host = $("toastHost");
     if (host) setTimeout(() => { try { host.remove(); } catch(e){} }, 6000);
 
     const params = new URLSearchParams(window.location.search);
@@ -1222,7 +1241,7 @@ BASE_HEAD = """
       const del = (params.get("DELETE_FILES") || "1") === "1";
       const excl = (params.get("ADD_IMPORT_EXCLUSION") || "0") === "1";
 
-      const title = document.getElementById("jobTitle");
+      const title = $("jobTitle");
       if (title) title.textContent = jid ? "Edit Job" : "Add Job";
 
       setVal("job_id", jid);
@@ -1240,13 +1259,11 @@ BASE_HEAD = """
       setChecked("job_dry", dry);
       setChecked("job_delete", del);
       setChecked("job_excl", excl);
-
-      // enabled moved to last
       setVal("job_enabled", enabled);
 
       showModal("jobBack");
     } else {
-      const appSel = document.getElementById("job_app");
+      const appSel = $("job_app");
       const appKey = appSel ? (appSel.value || "radarr") : "radarr";
       updateSonarrModeVisibility(appKey);
     }
@@ -1263,12 +1280,12 @@ def shell(page_title: str, active: str, body: str):
 
     def pill(name, href, key):
         cls = "pill active" if active == key else "pill"
-        return f'<a class="{cls}" href="{href}">{name}</a>'
+        return f'<a class="{cls}" href="{href}">{safe_html(name)}</a>'
 
     theme_label = "Light" if theme == "dark" else "Dark"
     theme_btn = f"""
       <form method="post" action="/toggle-theme" style="margin:0;">
-        <button class="pill" type="submit">Theme: {theme_label}</button>
+        <button class="pill" type="submit">Theme: {safe_html(theme_label)}</button>
       </form>
     """
 
@@ -1293,10 +1310,10 @@ def shell(page_title: str, active: str, body: str):
 <!doctype html>
 <html>
 <head>
-  <title>{page_title}</title>
+  <title>{safe_html(page_title)}</title>
   {BASE_HEAD}
 </head>
-<body data-theme="{theme}">
+<body data-theme="{safe_html(theme)}">
   <div class="wrap">
     <div class="topbar">
       <div class="brand">
@@ -1368,6 +1385,18 @@ def reset_sonarr():
     return redirect("/settings")
 
 
+def _test_connection(kind: str, url: str, api_key: str, timeout_s: int):
+    r = requests.get(
+        (url or "").rstrip("/") + "/api/v3/system/status",
+        headers={"X-Api-Key": api_key or ""},
+        timeout=timeout_s,
+    )
+    if r.status_code in (401, 403):
+        raise PermissionError(f"{kind} connection failed: Unauthorized (API key incorrect).")
+    r.raise_for_status()
+    return True
+
+
 @app.post("/test-radarr")
 def test_radarr():
     cfg = load_config()
@@ -1386,16 +1415,7 @@ def test_radarr():
         return redirect("/settings")
 
     try:
-        r = requests.get(
-            url + "/api/v3/system/status",
-            headers={"X-Api-Key": api_key},
-            timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)),
-        )
-        if r.status_code in (401, 403):
-            flash("Radarr connection failed: Unauthorized (API key incorrect).", "error")
-            return redirect("/settings")
-
-        r.raise_for_status()
+        _test_connection("Radarr", url, api_key, int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)))
 
         cfg["RADARR_URL"] = url
         cfg["RADARR_API_KEY"] = api_key
@@ -1406,6 +1426,8 @@ def test_radarr():
         flash("Radarr connected ✔", "success")
         return redirect("/settings")
 
+    except PermissionError as e:
+        flash(str(e), "error")
     except requests.exceptions.ConnectTimeout:
         flash("Radarr connection failed: timeout connecting to the host.", "error")
     except requests.exceptions.ConnectionError:
@@ -1434,16 +1456,7 @@ def test_sonarr():
         return redirect("/settings")
 
     try:
-        r = requests.get(
-            url + "/api/v3/system/status",
-            headers={"X-Api-Key": api_key},
-            timeout=int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)),
-        )
-        if r.status_code in (401, 403):
-            flash("Sonarr connection failed: Unauthorized (API key incorrect).", "error")
-            return redirect("/settings")
-
-        r.raise_for_status()
+        _test_connection("Sonarr", url, api_key, int(cfg.get("HTTP_TIMEOUT_SECONDS", 30)))
 
         cfg["SONARR_URL"] = url
         cfg["SONARR_API_KEY"] = api_key
@@ -1454,6 +1467,8 @@ def test_sonarr():
         flash("Sonarr connected ✔", "success")
         return redirect("/settings")
 
+    except PermissionError as e:
+        flash(str(e), "error")
     except requests.exceptions.ConnectTimeout:
         flash("Sonarr connection failed: timeout connecting to the host.", "error")
     except requests.exceptions.ConnectionError:
@@ -1675,7 +1690,6 @@ def save_settings():
     if old.get("SONARR_URL") != cfg["SONARR_URL"] or old.get("SONARR_API_KEY") != cfg["SONARR_API_KEY"]:
         cfg["SONARR_OK"] = False
 
-    # Validation respecting toggles
     if cfg.get("RADARR_ENABLED", True):
         if not cfg.get("RADARR_OK", False):
             flash("Radarr enabled: click Test Connection and make sure it shows Connected before saving.", "error")
@@ -1698,30 +1712,22 @@ def save_settings():
     return redirect("/settings")
 
 
-# ✅ Enabled toggle that saves immediately
 @app.post("/jobs/toggle-enabled")
 def jobs_toggle_enabled():
     cfg = load_config()
     job_id = (request.form.get("job_id") or "").strip()
-    enabled = request.form.get("enabled") == "on"
-
     if not job_id:
-        flash("Missing job id.", "error")
         return redirect("/jobs")
 
+    enabled = checkbox("enabled")
+
     jobs = cfg.get("JOBS") or []
-    updated = False
     for i, j in enumerate(jobs):
         if str(j.get("id")) == job_id:
             jj = normalize_job(j)
-            jj["enabled"] = bool(enabled)
+            jj["enabled"] = enabled
             jobs[i] = jj
-            updated = True
             break
-
-    if not updated:
-        flash("Job not found.", "error")
-        return redirect("/jobs")
 
     cfg["JOBS"] = [normalize_job(j) for j in jobs]
     save_config(cfg)
@@ -1732,16 +1738,8 @@ def jobs_toggle_enabled():
 def jobs_page():
     cfg = load_config()
 
-    radarr_labels = []
-    sonarr_labels = []
-    try:
-        radarr_labels = get_tag_labels(cfg, "radarr")
-    except Exception:
-        radarr_labels = []
-    try:
-        sonarr_labels = get_tag_labels(cfg, "sonarr")
-    except Exception:
-        sonarr_labels = []
+    radarr_labels = get_tag_labels(cfg, "radarr")
+    sonarr_labels = get_tag_labels(cfg, "sonarr")
 
     available_apps = []
     if radarr_labels:
@@ -1749,7 +1747,6 @@ def jobs_page():
     if sonarr_labels:
         available_apps.append("sonarr")
 
-    # Default app selection in modal:
     default_app = "radarr"
     if len(available_apps) == 1:
         default_app = available_apps[0]
@@ -1771,6 +1768,11 @@ def jobs_page():
     </script>
     """
 
+    sonarr_mode_opts = "".join(
+        f'<option value="{safe_html(k)}">{safe_html(sonarr_delete_mode_label(k))}</option>'
+        for k in SONARR_DELETE_MODES
+    )
+
     job_modal = f"""
     <div class="modalBack" id="jobBack">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="jobTitle">
@@ -1783,7 +1785,6 @@ def jobs_page():
             <input type="hidden" name="job_id" id="job_id" value="">
 
             <div class="form">
-              <!-- Job Name BEFORE App -->
               <div class="field">
                 <label>Job Name</label>
                 <input type="text" name="name" id="job_name" value="New Job" required>
@@ -1810,13 +1811,10 @@ def jobs_page():
                 <input type="number" min="1" name="DAYS_OLD" id="job_days" value="30" required>
               </div>
 
-              <!-- Sonarr-only delete mode -->
               <div class="field" id="sonarrDeleteModeField" style="display:none;">
                 <label>Sonarr Delete Mode</label>
                 <select name="SONARR_DELETE_MODE" id="job_sonarr_mode">
-                  <option value="episodes_only">Episodes only (keep Series in Sonarr)</option>
-                  <option value="episodes_then_series_if_empty">Episodes, Series only if empty (remove Series from Sonarr)</option>
-                  <option value="series_whole">Whole Series (remove from Sonarr)</option>
+                  {sonarr_mode_opts}
                 </select>
               </div>
 
@@ -1841,7 +1839,6 @@ def jobs_page():
                 </select>
               </div>
 
-              <!-- Enabled moved to LAST -->
               <div class="field">
                 <label>Enabled</label>
                 <select name="enabled" id="job_enabled">
@@ -1887,156 +1884,130 @@ def jobs_page():
     </div>
     """
 
-    # ✅ Dynamic modal content placeholders (expanded)
-    run_confirm_modal = """
-    <div class="modalBack" id="runNowBack">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="runNowTitle">
-        <div class="mh">
-          <h3 id="runNowTitle">Run Now confirmation</h3>
-        </div>
-        <div class="mb">
-          <div style="margin-bottom:10px;">
-            <div class="muted">App: <b><span id="rn_app">Radarr</span></b></div>
-            <div class="muted">
-              Job: <b><span id="rn_enabled">Enabled</span></b>
-              • Dry Run: <b><span id="rn_dry">OFF</span></b>
-              • Delete Files: <b><span id="rn_del">ON</span></b>
-              • Import Exclusion: <b><span id="rn_excl">OFF</span></b>
-            </div>
-            <div id="rn_son_wrap" class="muted" style="display:none; margin-top:6px;">
-              Sonarr delete mode: <b><span id="rn_sonmode"></span></b>
-            </div>
-          </div>
-
-          <p><b id="rn_msg">Dry Run is OFF — this will perform real actions.</b></p>
-
-          <p id="rn_hint_delete" class="muted">
-            With <b>Delete Files</b> enabled, it may delete files from disk via the app.
-          </p>
-
-          <p id="rn_hint_no_delete" class="muted" style="display:none;">
-            With <b>Delete Files</b> disabled, it should avoid deleting from disk.
-          </p>
-
-          <p class="muted">If you’re not sure, edit the job and enable <b>Dry Run</b>, then use Preview.</p>
-        </div>
-        <div class="mf">
-          <button class="btn" type="button" onclick="hideModal('runNowBack')">Cancel</button>
-          <form id="runNowFormConfirm" method="post" action="/jobs/run-now" style="margin:0;">
-            <input type="hidden" id="runNowJobId" name="job_id" value="">
-            <button id="rn_confirm_btn" class="btn bad" type="button" onclick="runNowSubmitConfirm()">Yes, run now</button>
-          </form>
-        </div>
-      </div>
-    </div>
-    """
-
     job_cards = []
-    for j in cfg["JOBS"]:
-        j = normalize_job(j)
-        sched = schedule_label(j["SCHED_DAY"], j["SCHED_HOUR"])
+    for j0 in cfg["JOBS"]:
+        j = normalize_job(j0)
         app_key = (j.get("APP") or "radarr").lower()
         app_label = "Radarr" if app_key == "radarr" else "Sonarr"
 
-        dry = "on" if j["DRY_RUN"] else "off"
-        delete_files = "on" if j["DELETE_FILES"] else "off"
-        import_excl = "on" if j["ADD_IMPORT_EXCLUSION"] else "off"
+        sched = schedule_label(j["SCHED_DAY"], j["SCHED_HOUR"])
+        tag_val = j.get("TAG_LABEL") or "—"
 
-        # ✅ Run Now disabled when job disabled
-        run_now_disabled_attr = "" if j["enabled"] else "disabled"
-        run_now_title = "Run Now" if j["enabled"] else "Job is disabled"
+        dry_val = "ON" if j.get("DRY_RUN") else "OFF"
+        del_val = "ON" if j.get("DELETE_FILES") else "OFF"
+        excl_val = "ON" if j.get("ADD_IMPORT_EXCLUSION") else "OFF"
 
-        if j["DRY_RUN"]:
-            run_now_html = f"""
-              <form method="post" action="/jobs/run-now" style="margin:0;">
-                <input type="hidden" name="job_id" value="{safe_html(j["id"])}">
-                <button class="btn good" type="submit" {run_now_disabled_attr} title="{safe_html(run_now_title)}">Run Now</button>
-              </form>
-            """
-        else:
-            run_now_html = f"""
-              <button class="btn bad"
-                type="button"
-                {run_now_disabled_attr}
-                title="{safe_html(run_now_title)}"
-                onclick="openRunNowConfirm('{safe_html(j["id"])}', {{
-                  app: '{safe_html(app_key)}',
-                  dryRun: {str(bool(j["DRY_RUN"])).lower()},
-                  deleteFiles: {str(bool(j["DELETE_FILES"])).lower()},
-                  addImportExclusion: {str(bool(j["ADD_IMPORT_EXCLUSION"])).lower()},
-                  enabled: {str(bool(j["enabled"])).lower()},
-                  sonarrDeleteMode: '{safe_html(j.get("SONARR_DELETE_MODE",""))}'
-                }})">Run Now</button>
-            """
-
-        # ✅ Stacked job meta (all values bold)
         sonarr_mode_line = ""
         if app_key == "sonarr":
-            sonarr_mode_line = f'<div>Sonarr mode: <b>{safe_html(sonarr_delete_mode_label(j.get("SONARR_DELETE_MODE")))}</b></div>'
+            sonarr_mode_line = f"""
+              <div class="metaRow">
+                <div class="metaLabel">Sonarr mode:</div>
+                <div class="metaVal"><b>{safe_html(sonarr_delete_mode_label(j.get("SONARR_DELETE_MODE")))}</b></div>
+              </div>
+            """
+
+        edit_btn = f"""
+          <button class="btn"
+                  type="button"
+                  onclick="openEditJob(this)"
+                  data-id="{safe_html(j["id"])}"
+                  data-name="{safe_html(j["name"])}"
+                  data-enabled="{ '1' if j["enabled"] else '0' }"
+                  data-app="{safe_html(app_key)}"
+                  data-tag="{safe_html(j["TAG_LABEL"])}"
+                  data-sonarr-mode="{safe_html(j.get('SONARR_DELETE_MODE','episodes_only'))}"
+                  data-days="{j["DAYS_OLD"]}"
+                  data-day="{safe_html(j["SCHED_DAY"])}"
+                  data-hour="{j["SCHED_HOUR"]}"
+                  data-dry="{ '1' if j["DRY_RUN"] else '0' }"
+                  data-del="{ '1' if j["DELETE_FILES"] else '0' }"
+                  data-excl="{ '1' if j["ADD_IMPORT_EXCLUSION"] else '0' }">Edit</button>
+        """
+
+        delete_btn = f"""
+          <form method="post" action="/jobs/delete" style="margin:0;"
+                onsubmit="return confirm('Are you sure you want to delete this job?');">
+            <input type="hidden" name="job_id" value="{safe_html(j["id"])}">
+            <button class="btn bad" type="submit">Delete</button>
+          </form>
+        """
 
         job_cards.append(f"""
           <div class="jobCard">
-            <div class="jobTop">
-              <div>
+            <div class="jobHeader">
+              <div class="jobHeaderLeft">
                 <div class="jobName">{safe_html(j["name"])}</div>
-                <div class="jobMeta">
-                  <div>App: <b>{safe_html(app_label)}</b></div>
-                  <div>Tag: <b>{safe_html(j["TAG_LABEL"])}</b></div>
-                  <div>Older than <b>{j["DAYS_OLD"]}</b> days</div>
-                  {sonarr_mode_line}
-                  <div>Schedule: <b>{safe_html(sched)}</b></div>
-                  <div>Delete files: <b>{delete_files}</b></div>
-                  <div>Import Exclusion: <b>{import_excl}</b></div>
-                  <div>Dry-run: <b>{dry}</b></div>
-                </div>
               </div>
-              <div class="btnrow">
-                {run_now_html}
+
+              <div class="jobHeaderCenter">
                 <a class="btn" href="/preview?job_id={safe_html(j["id"])}">Preview</a>
+              </div>
+
+              <div class="jobHeaderRight">
+                <form method="post" action="/jobs/toggle-enabled" style="margin:0;">
+                  <input type="hidden" name="job_id" value="{safe_html(j["id"])}">
+                  <div class="enableWrap">
+                    <div class="enableLbl">Enable</div>
+                    <label class="switch" title="Enable/Disable Job">
+                      <input type="checkbox" name="enabled" {"checked" if j["enabled"] else ""} onchange="this.form.submit()">
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </form>
               </div>
             </div>
 
             <div class="jobBody">
-              <div class="btnrow">
-                <form method="post" action="/jobs/toggle-enabled" style="margin:0; display:flex; align-items:center; gap:10px;">
-                  <input type="hidden" name="job_id" value="{safe_html(j["id"])}">
-                  <div class="muted" style="font-weight:700;">Enabled</div>
-                  <label class="switch sm" title="Enable/Disable this job">
-                    <input type="checkbox" name="enabled" {"checked" if j["enabled"] else ""} onchange="this.form.submit()">
-                    <span class="slider"></span>
-                  </label>
-                </form>
-                <span class="tagPill">ID: <code>{safe_html(j["id"])}</code></span>
+              <!-- meta LEFT -->
+              <div class="metaStack">
+                <div class="metaRow">
+                  <div class="metaLabel">App:</div>
+                  <div class="metaVal"><b>{safe_html(app_label)}</b></div>
+                </div>
+
+                <div class="metaRow">
+                  <div class="metaLabel">Tag:</div>
+                  <div class="metaVal"><b>{safe_html(tag_val)}</b></div>
+                </div>
+
+                <div class="metaRow">
+                  <div class="metaLabel">Older than:</div>
+                  <div class="metaVal"><b>{int(j["DAYS_OLD"])} days</b></div>
+                </div>
+
+                {sonarr_mode_line}
+
+                <div class="metaRow">
+                  <div class="metaLabel">Schedule:</div>
+                  <div class="metaVal"><b>{safe_html(sched)}</b></div>
+                </div>
+
+                <div class="metaRow">
+                  <div class="metaLabel">Delete files:</div>
+                  <div class="metaVal"><b>{del_val}</b></div>
+                </div>
+
+                <div class="metaRow">
+                  <div class="metaLabel">Import Exclusion:</div>
+                  <div class="metaVal"><b>{excl_val}</b></div>
+                </div>
+
+                <div class="metaRow">
+                  <div class="metaLabel">Dry-run:</div>
+                  <div class="metaVal"><b>{dry_val}</b></div>
+                </div>
               </div>
 
-              <div class="btnrow">
-                <button class="btn"
-                        type="button"
-                        onclick="openEditJob(this)"
-                        data-id="{safe_html(j["id"])}"
-                        data-name="{safe_html(j["name"])}"
-                        data-enabled="{ '1' if j["enabled"] else '0' }"
-                        data-app="{safe_html(app_key)}"
-                        data-tag="{safe_html(j["TAG_LABEL"])}"
-                        data-sonarr-mode="{safe_html(j.get("SONARR_DELETE_MODE","episodes_only"))}"
-                        data-days="{j["DAYS_OLD"]}"
-                        data-day="{safe_html(j["SCHED_DAY"])}"
-                        data-hour="{j["SCHED_HOUR"]}"
-                        data-dry="{ '1' if j["DRY_RUN"] else '0' }"
-                        data-del="{ '1' if j["DELETE_FILES"] else '0' }"
-                        data-excl="{ '1' if j["ADD_IMPORT_EXCLUSION"] else '0' }">Edit</button>
-
-                <form method="post" action="/jobs/delete" style="margin:0;"
-                      onsubmit="return confirm('Are you sure you want to delete this job?');">
-                  <input type="hidden" name="job_id" value="{safe_html(j["id"])}">
-                  <button class="btn bad" type="submit">Delete</button>
-                </form>
+              <!-- rail RIGHT -->
+              <div class="jobRail">
+                {run_now_button_html(j)}
+                {edit_btn}
+                {delete_btn}
               </div>
             </div>
           </div>
         """)
 
-    # Disable Add Job if neither Radarr nor Sonarr is connected (no tags available)
     can_add_job = len(available_apps) > 0
     add_job_disabled_attr = "" if can_add_job else "disabled"
     add_job_title = "Add Job" if can_add_job else "Connect Radarr or Sonarr in Settings (Test Connection) to add a job."
@@ -2080,7 +2051,7 @@ def jobs_page():
       </div>
 
       {job_modal}
-      {run_confirm_modal}
+      {run_now_modal_html()}
     """
     return render_template_string(shell("mediareaparr • Jobs", "jobs", body))
 
@@ -2097,13 +2068,8 @@ def jobs_save():
         if app_key not in ("radarr", "sonarr"):
             raise ValueError("Invalid app selection.")
 
-        # Ensure chosen app is actually connected/enabled
-        if app_key == "radarr":
-            if not (cfg.get("RADARR_ENABLED", True) and cfg.get("RADARR_URL") and cfg.get("RADARR_API_KEY") and cfg.get("RADARR_OK")):
-                raise ValueError("Radarr is not connected/enabled. Go to Settings and connect Radarr (or pick Sonarr).")
-        else:
-            if not (cfg.get("SONARR_ENABLED", False) and cfg.get("SONARR_URL") and cfg.get("SONARR_API_KEY") and cfg.get("SONARR_OK")):
-                raise ValueError("Sonarr is not connected/enabled. Go to Settings and connect Sonarr (or pick Radarr).")
+        if not is_app_ready(cfg, app_key):
+            raise ValueError(f"{'Radarr' if app_key=='radarr' else 'Sonarr'} is not connected/enabled. Go to Settings and connect it (or pick the other app).")
 
         tag_label = (request.form.get("TAG_LABEL") or "").strip()
         if not tag_label:
@@ -2133,15 +2099,15 @@ def jobs_save():
 
         jobs = cfg.get("JOBS") or []
         replaced = False
-        for i, j in enumerate(jobs):
-            if str(j.get("id")) == job["id"]:
+        for i, jj in enumerate(jobs):
+            if str(jj.get("id")) == job["id"]:
                 jobs[i] = job
                 replaced = True
                 break
         if not replaced:
             jobs.append(job)
 
-        cfg["JOBS"] = [normalize_job(j) for j in jobs]
+        cfg["JOBS"] = [normalize_job(x) for x in jobs]
         save_config(cfg)
 
         flash("Job saved ✔", "success")
@@ -2192,10 +2158,13 @@ def jobs_run_now():
         flash("Missing job id.", "error")
         return redirect("/jobs")
 
-    # Safety: prevent running disabled jobs
-    job = next((normalize_job(j) for j in (cfg.get("JOBS") or []) if str(j.get("id")) == job_id), None)
-    if job and not job.get("enabled", True):
-        flash("Job is disabled. Enable it before running.", "error")
+    job = find_job(cfg, job_id)
+    if not job:
+        flash("Job not found.", "error")
+        return redirect("/jobs")
+
+    if not job.get("enabled", False):
+        flash("This job is disabled. Enable it before running.", "error")
         return redirect("/jobs")
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -2234,12 +2203,15 @@ def apply_cron():
     return redirect(request.referrer or "/jobs")
 
 
+# --------------------------
+# Preview
+# --------------------------
 @app.get("/preview")
 def preview():
     cfg = load_config()
     job_id = (request.args.get("job_id") or "").strip()
 
-    job = next((normalize_job(j) for j in (cfg.get("JOBS") or []) if str(j.get("id")) == job_id), None)
+    job = find_job(cfg, job_id)
     if not job:
         job = normalize_job((cfg.get("JOBS") or [job_defaults()])[0])
 
@@ -2270,94 +2242,10 @@ def preview():
               </tr>
             """
 
-        # ✅ Run Now disabled when job disabled
-        run_now_disabled_attr = "" if job["enabled"] else "disabled"
-        run_now_title = "Run Now" if job["enabled"] else "Job is disabled"
-
-        if job["DRY_RUN"]:
-            run_now_html = f"""
-              <form method="post" action="/jobs/run-now" style="margin:0;">
-                <input type="hidden" name="job_id" value="{safe_html(job["id"])}">
-                <button class="btn good" type="submit" {run_now_disabled_attr} title="{safe_html(run_now_title)}">Run Now</button>
-              </form>
-            """
-        else:
-            run_now_html = f"""
-              <button class="btn bad" type="button"
-                {run_now_disabled_attr}
-                title="{safe_html(run_now_title)}"
-                onclick="openRunNowConfirm('{safe_html(job["id"])}', {{
-                  app: '{safe_html(job.get("APP","radarr"))}',
-                  dryRun: {str(bool(job["DRY_RUN"])).lower()},
-                  deleteFiles: {str(bool(job.get("DELETE_FILES", True))).lower()},
-                  addImportExclusion: {str(bool(job.get("ADD_IMPORT_EXCLUSION", False))).lower()},
-                  enabled: {str(bool(job.get("enabled", True))).lower()},
-                  sonarrDeleteMode: '{safe_html(job.get("SONARR_DELETE_MODE",""))}'
-                }})">Run Now</button>
-            """
-
-        # ✅ Same dynamic modal as Jobs page
-        run_confirm_modal = """
-        <div class="modalBack" id="runNowBack">
-          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="runNowTitle">
-            <div class="mh"><h3 id="runNowTitle">Run Now confirmation</h3></div>
-            <div class="mb">
-              <div style="margin-bottom:10px;">
-                <div class="muted">App: <b><span id="rn_app">Radarr</span></b></div>
-                <div class="muted">
-                  Job: <b><span id="rn_enabled">Enabled</span></b>
-                  • Dry Run: <b><span id="rn_dry">OFF</span></b>
-                  • Delete Files: <b><span id="rn_del">ON</span></b>
-                  • Import Exclusion: <b><span id="rn_excl">OFF</span></b>
-                </div>
-                <div id="rn_son_wrap" class="muted" style="display:none; margin-top:6px;">
-                  Sonarr delete mode: <b><span id="rn_sonmode"></span></b>
-                </div>
-              </div>
-
-              <p><b id="rn_msg">Dry Run is OFF — this will perform real actions.</b></p>
-
-              <p id="rn_hint_delete" class="muted">
-                With <b>Delete Files</b> enabled, it may delete files from disk via the app.
-              </p>
-
-              <p id="rn_hint_no_delete" class="muted" style="display:none;">
-                With <b>Delete Files</b> disabled, it should avoid deleting from disk.
-              </p>
-
-              <p class="muted">If you’re not sure, edit the job and enable <b>Dry Run</b>, then use Preview.</p>
-            </div>
-            <div class="mf">
-              <button class="btn" type="button" onclick="hideModal('runNowBack')">Cancel</button>
-              <form id="runNowFormConfirm" method="post" action="/jobs/run-now" style="margin:0;">
-                <input type="hidden" id="runNowJobId" name="job_id" value="">
-                <button id="rn_confirm_btn" class="btn bad" type="button" onclick="runNowSubmitConfirm()">Yes, run now</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-
         app_label = "Sonarr" if job.get("APP") == "sonarr" else "Radarr"
-        sched_txt = schedule_label(job["SCHED_DAY"], job["SCHED_HOUR"])
-        delete_files = "on" if job["DELETE_FILES"] else "off"
-        import_excl = "on" if job["ADD_IMPORT_EXCLUSION"] else "off"
-        dry = "on" if job["DRY_RUN"] else "off"
-
-        enabled_toggle_html = f"""
-        <form method="post" action="/jobs/toggle-enabled" style="margin:0; display:flex; align-items:center; gap:10px;">
-          <input type="hidden" name="job_id" value="{safe_html(job["id"])}">
-          <div class="muted" style="font-weight:700;">Enabled</div>
-          <label class="switch sm" title="Enable/Disable this job">
-            <input type="checkbox" name="enabled" {"checked" if job["enabled"] else ""} onchange="this.form.submit()">
-            <span class="slider"></span>
-          </label>
-        </form>
-        """
-
         sonarr_mode_line = ""
         if job.get("APP") == "sonarr":
-            sonarr_mode_line = f'<div>Sonarr mode: <b>{safe_html(sonarr_delete_mode_label(job.get("SONARR_DELETE_MODE")))}</b></div>'
+            sonarr_mode_line = f" • Mode: <b>{safe_html(sonarr_delete_mode_label(job.get('SONARR_DELETE_MODE')))}</b>"
 
         body = f"""
           <div class="grid">
@@ -2366,27 +2254,14 @@ def preview():
                 <h2>Preview candidates</h2>
                 <div class="btnrow">
                   <a class="btn" href="/jobs">Back to Jobs</a>
-                  {run_now_html}
+                  {run_now_button_html(job)}
                 </div>
               </div>
               <div class="bd">
-                <div class="jobMeta">
-                  <div>Job: <b>{safe_html(job["name"])}</b></div>
-                  <div>App: <b>{safe_html(app_label)}</b></div>
-                  <div>Tag: <b>{safe_html(job["TAG_LABEL"])}</b></div>
-                  <div>Older than <b>{job["DAYS_OLD"]}</b> days</div>
-                  {sonarr_mode_line}
-                  <div>Schedule: <b>{safe_html(sched_txt)}</b></div>
-                  <div>Delete files: <b>{delete_files}</b></div>
-                  <div>Import Exclusion: <b>{import_excl}</b></div>
-                  <div>Dry-run: <b>{dry}</b></div>
+                <div class="muted">
+                  App: <b>{safe_html(app_label)}</b>{sonarr_mode_line} • Job: <b>{safe_html(job["name"])}</b> • Tag <code>{safe_html(job["TAG_LABEL"])}</code> • Older than <code>{job["DAYS_OLD"]}</code> days
                 </div>
-
-                <div style="margin-top:10px;">
-                  {enabled_toggle_html}
-                </div>
-
-                <div class="muted" style="margin-top:10px;">Found <b>{len(candidates)}</b> candidate(s). Preview only (no deletes).</div>
+                <div class="muted" style="margin-top:6px;">Found <b>{len(candidates)}</b> candidate(s). Preview only (no deletes).</div>
                 <div class="muted" style="margin-top:6px;">Cutoff: <code>{safe_html(cutoff)}</code></div>
 
                 <div class="tablewrap" style="margin-top:12px;">
@@ -2408,7 +2283,7 @@ def preview():
               </div>
             </div>
           </div>
-          {run_confirm_modal}
+          {run_now_modal_html()}
         """
         return render_template_string(shell("mediareaparr • Preview", "jobs", body))
 
@@ -2473,11 +2348,23 @@ def status():
         rows = []
         for k, v in d.items():
             if k == "JOBS":
-                rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>[{len(v or [])} jobs]</td></tr>")
+                jobs = [normalize_job(x) for x in (v or [])]
+                parts = []
+                for j in jobs[:50]:
+                    app_key = (j.get("APP") or "radarr").lower()
+                    mode_txt = ""
+                    if app_key == "sonarr":
+                        mode_txt = f", mode={sonarr_delete_mode_label(j.get('SONARR_DELETE_MODE'))}"
+                    parts.append(f"{j.get('name','Job')} ({app_key}, tag={j.get('TAG_LABEL','')}{mode_txt})")
+                summary = "; ".join(parts) + (" …" if len(jobs) > 50 else "")
+                rows.append(
+                    f"<tr><td><code>{safe_html(k)}</code></td>"
+                    f"<td class='muted'>{safe_html(summary) if summary else safe_html(f'[{len(jobs)} jobs]')}</td></tr>"
+                )
             elif "API_KEY" in str(k).upper():
                 rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>***</td></tr>")
             else:
-                rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>{safe_html(str(v))}</td></tr>")
+                rows.append(f"<tr><td><code>{safe_html(k)}</code></td><td class='muted'>{safe_html(v)}</td></tr>")
         return "".join(rows)
 
     body = f"""
