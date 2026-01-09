@@ -578,8 +578,8 @@ BASE_HEAD = """
   }
 
   .pageBody{
-    flex: 1 1 auto;   /* fills space under the topbar */
-    min-height: 0;    /* REQUIRED for nested scrolling */
+    flex: 1 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: column;
   }
@@ -588,14 +588,14 @@ BASE_HEAD = """
   .pageBody > .grid{
     flex: 1 1 auto;
     min-height: 0;
-    display: flex;
+    align-content: stretch; /* keep grid behavior */
   }
 
   .pageBody > .grid > .card{
-    flex: 1 1 auto;
-    min-height: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
 
   body[data-theme="dark"] { color-scheme: dark; }
@@ -685,13 +685,13 @@ BASE_HEAD = """
     display:flex; align-items:center; justify-content: space-between;
     gap:12px;
     background: var(--panel2);
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
   }
   [data-theme="light"] .card .hd{ background: #f3f4f6; }
   .card .hd h2{ margin:0; font-size: 14px; letter-spacing:.2px; }
-  .card .bd{ padding: 14px 16px; background: var(--panel); }
+  .card .bd{ padding: 14px 16px; background: var(--panel); flex: 1 1 auto; min-height: 0; overflow: auto; }
 
   .muted{ color: var(--muted); }
 
