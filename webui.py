@@ -542,9 +542,6 @@ BASE_HEAD = """
     --shadow: 0 12px 30px rgba(0,0,0,.08);
   }
 
-  * { box-sizing: border-box; }
-  html, body { height: 100%; }
-
   body{
     min-height: 100vh;
     margin:0;
@@ -656,7 +653,25 @@ BASE_HEAD = """
     align-items: center;
     gap: 8px;
   }
-  .btn:hover{ border-color: rgba(34,197,94,.45); }
+  /* Buttons should never underline on hover */
+  a.btn:hover{ text-decoration: none; }
+
+  /* Subtle hover glow for all buttons */
+  .btn{
+    transition: box-shadow .18s ease, border-color .18s ease, transform .18s ease, filter .18s ease;
+  }
+
+  .btn:hover{
+    border-color: rgba(34,197,94,.55);
+    box-shadow: 0 0 0 3px rgba(34,197,94,.10), 0 10px 22px rgba(0,0,0,.22);
+    transform: translateY(-1px);
+  }
+
+  .btn:active{
+    transform: translateY(0);
+    box-shadow: 0 0 0 2px rgba(34,197,94,.08), 0 6px 14px rgba(0,0,0,.18);
+  }
+
   .btn:disabled{
     opacity: .45;
     cursor: not-allowed;
