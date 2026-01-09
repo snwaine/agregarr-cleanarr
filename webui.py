@@ -866,7 +866,9 @@ BASE_HEAD = """
     background: var(--panel2);
     overflow:hidden;
   }
-  @media(min-width: 900px){ .jobCard{ grid-column: span 6; } }
+
+  @media(min-width: 900px){ .jobCard{ grid-column: span 4; } }
+  
   [data-theme="light"] .jobCard{ background: #ffffff; }
 
   .jobHeader{

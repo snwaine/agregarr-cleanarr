@@ -612,7 +612,7 @@ BASE_HEAD = """
   a:hover{ text-decoration: underline; }
 
   .wrap{
-    max-width: 1200px;
+    max-width: min(1600px, 95vw);
     margin: 0 auto;
     padding: 22px 18px 0px;
     width: 100%;
