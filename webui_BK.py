@@ -542,10 +542,6 @@ BASE_HEAD = """
     --shadow: 0 12px 30px rgba(0,0,0,.08);
   }
 
-  html, body{
-    height: 100%;
-  }
-
   body{
     min-height: 100vh;
     margin:0;
@@ -558,23 +554,6 @@ BASE_HEAD = """
       var(--bg);
     background-attachment: fixed;
     color: var(--text);
-
-    /* full-height layout */
-    display:flex;
-    flex-direction: column;
-  }
-
-  /* Soft bottom “landing” gradient */
-  body:after{
-    content:"";
-    position: fixed;
-    left: 0; right: 0; bottom: 0;
-    height: 140px;
-    pointer-events: none;
-    background: linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,.35));
-  }
-  body[data-theme="light"]:after{
-    background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(0,0,0,.08));
   }
 
   body[data-theme="dark"] { color-scheme: dark; }
@@ -583,14 +562,7 @@ BASE_HEAD = """
   a{ color: var(--text); text-decoration: none; }
   a:hover{ text-decoration: underline; }
 
-  .wrap{
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 22px 18px 36px;
-    width: 100%;
-    flex: 1 0 auto; /* fills remaining height */
-    box-sizing: border-box;
-  }
+  .wrap{ max-width: 1200px; margin: 0 auto; padding: 22px 18px 36px; }
 
   .topbar{
     display:flex; align-items:center; justify-content: space-between;
@@ -681,16 +653,20 @@ BASE_HEAD = """
     align-items: center;
     gap: 8px;
   }
+  /* Buttons should never underline on hover */
   a.btn:hover{ text-decoration: none; }
 
+  /* Subtle hover glow for all buttons */
   .btn{
     transition: box-shadow .18s ease, border-color .18s ease, transform .18s ease, filter .18s ease;
   }
+
   .btn:hover{
     border-color: rgba(34,197,94,.55);
     box-shadow: 0 0 0 3px rgba(34,197,94,.10), 0 10px 22px rgba(0,0,0,.22);
     transform: translateY(-1px);
   }
+
   .btn:active{
     transform: translateY(0);
     box-shadow: 0 0 0 2px rgba(34,197,94,.08), 0 6px 14px rgba(0,0,0,.18);
@@ -855,11 +831,12 @@ BASE_HEAD = """
   .enableWrap{ display:flex; align-items:center; gap:10px; }
   .enableLbl{ font-size: 12px; color: var(--muted); white-space: nowrap; }
 
+  /* ✅ Job body 2-col: meta left, action rail right */
   .jobBody{
     padding: 12px 12px;
     background: var(--panel2);
     display: grid;
-    grid-template-columns: 1fr 80px;
+    grid-template-columns: 1fr 80px; /* requested */
     gap: 12px;
     align-items: start;
   }
@@ -873,8 +850,8 @@ BASE_HEAD = """
   }
   .jobRail .btn{
     width: 100%;
-    text-align: center;
-    justify-content: center;
+    text-align: center;       /* rail is narrow now */
+    justify-content: center;  /* center content */
     padding: 10px 8px;
   }
 
@@ -883,6 +860,7 @@ BASE_HEAD = """
   .metaLabel{ width: 130px; color: var(--muted); flex: 0 0 auto; }
   .metaVal{ color: var(--text); flex: 1 1 auto; min-width: 0; word-break: break-word; }
 
+  /* Modal */
   .modalBack{
     position: fixed; inset: 0;
     background: rgba(0,0,0,.68);
@@ -950,6 +928,7 @@ BASE_HEAD = """
   [data-theme="light"] th{ color:#111827; background: rgba(0,0,0,.03); }
   .tablewrap{ max-height: 420px; overflow:auto; border-radius: 14px; border: 1px solid var(--line); }
 
+  /* Toasts */
   .toastHost{
     position: fixed;
     right: 16px;
@@ -997,55 +976,10 @@ BASE_HEAD = """
       .replaceAll("'","&#39;");
   }
 
-  // -------------------
-  // Job modal dirty tracking
-  // -------------------
-  window.__JOB_MODAL_INITIAL = "";
-  window.__JOB_MODAL_DIRTY = false;
-
-  function jobFormSnapshot(){
-    const form = $("jobForm");
-    if (!form) return "";
-    const fd = new FormData(form);
-    const entries = [];
-    for (const [k, v] of fd.entries()){
-      entries.push([k, (v ?? "").toString()]);
-    }
-    const cbs = form.querySelectorAll('input[type="checkbox"][name]');
-    for (const cb of cbs){
-      if (!fd.has(cb.name)) entries.push([cb.name, ""]);
-    }
-    entries.sort((a,b) => (a[0]+a[1]).localeCompare(b[0]+b[1]));
-    return JSON.stringify(entries);
-  }
-
-  function jobModalMarkClean(){
-    window.__JOB_MODAL_INITIAL = jobFormSnapshot();
-    window.__JOB_MODAL_DIRTY = false;
-  }
-
-  function jobModalUpdateDirty(){
-    const snap = jobFormSnapshot();
-    window.__JOB_MODAL_DIRTY = (snap !== window.__JOB_MODAL_INITIAL);
-  }
-
-  function maybeCloseJobModal(){
-    const back = $("jobBack");
-    if (!back || back.style.display !== "flex") {
-      hideModal("jobBack");
-      return;
-    }
-    jobModalUpdateDirty();
-    if (window.__JOB_MODAL_DIRTY){
-      if (!confirm("Discard changes to this job?")) return;
-    }
-    hideModal("jobBack");
-  }
-
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       hideModal("runNowBack");
-      maybeCloseJobModal();
+      hideModal("jobBack");
     }
   });
 
@@ -1096,7 +1030,6 @@ BASE_HEAD = """
     const appKey = appSel ? (appSel.value || "radarr") : "radarr";
     rebuildTagOptions(appKey, "");
     updateSonarrModeVisibility(appKey);
-    setTimeout(jobModalUpdateDirty, 0);
   }
 
   function openNewJob(){
@@ -1125,7 +1058,6 @@ BASE_HEAD = """
     const t = $("jobTitle");
     if (t) t.textContent = "Add Job";
     showModal("jobBack");
-    setTimeout(jobModalMarkClean, 0);
   }
 
   function openEditJob(btn){
@@ -1157,7 +1089,6 @@ BASE_HEAD = """
     const t = $("jobTitle");
     if (t) t.textContent = "Edit Job";
     showModal("jobBack");
-    setTimeout(jobModalMarkClean, 0);
   }
 
   function openRunNowConfirm(jobId, opts){
@@ -1183,6 +1114,7 @@ BASE_HEAD = """
     const msg = $("rn_msg");
     if (msg){
       const parts = [];
+      if (!enabled) parts.push("This job is currently disabled — running now will still execute it.");
       if (!dryRun) parts.push("Dry Run is OFF — this will perform real actions.");
       parts.push(deleteFiles ? "Delete Files is ON — files may be removed from disk." : "Delete Files is OFF — it should avoid disk deletes.");
       msg.textContent = parts.join(" ");
@@ -1278,22 +1210,8 @@ BASE_HEAD = """
     updateSaveState();
   }
 
-  document.addEventListener("input", (e) => {
-    onSettingsEdited(e);
-    const back = $("jobBack");
-    if (back && back.style.display === "flex") {
-      const form = $("jobForm");
-      if (form && form.contains(e.target)) jobModalUpdateDirty();
-    }
-  });
-  document.addEventListener("change", (e) => {
-    onSettingsEdited(e);
-    const back = $("jobBack");
-    if (back && back.style.display === "flex") {
-      const form = $("jobForm");
-      if (form && form.contains(e.target)) jobModalUpdateDirty();
-    }
-  });
+  document.addEventListener("input", onSettingsEdited);
+  document.addEventListener("change", onSettingsEdited);
 
   document.addEventListener("DOMContentLoaded", () => {
     const radSec = $("radarrSection");
@@ -1344,7 +1262,6 @@ BASE_HEAD = """
       setVal("job_enabled", enabled);
 
       showModal("jobBack");
-      setTimeout(jobModalMarkClean, 0);
     } else {
       const appSel = $("job_app");
       const appKey = appSel ? (appSel.value || "radarr") : "radarr";
@@ -1821,17 +1738,13 @@ def jobs_toggle_enabled():
 def jobs_page():
     cfg = load_config()
 
-    # Availability is readiness-based (not “has tags”)
-    radarr_ready = is_app_ready(cfg, "radarr")
-    sonarr_ready = is_app_ready(cfg, "sonarr")
-
-    radarr_labels = get_tag_labels(cfg, "radarr") if radarr_ready else []
-    sonarr_labels = get_tag_labels(cfg, "sonarr") if sonarr_ready else []
+    radarr_labels = get_tag_labels(cfg, "radarr")
+    sonarr_labels = get_tag_labels(cfg, "sonarr")
 
     available_apps = []
-    if radarr_ready:
+    if radarr_labels:
         available_apps.append("radarr")
-    if sonarr_ready:
+    if sonarr_labels:
         available_apps.append("sonarr")
 
     default_app = "radarr"
@@ -1963,7 +1876,7 @@ def jobs_page():
           </div>
 
           <div class="mf">
-            <button class="btn" type="button" onclick="maybeCloseJobModal()">Cancel</button>
+            <button class="btn" type="button" onclick="hideModal('jobBack')">Cancel</button>
             <button class="btn primary" type="submit">Save Job</button>
           </div>
         </form>
@@ -2045,6 +1958,7 @@ def jobs_page():
             </div>
 
             <div class="jobBody">
+              <!-- meta LEFT -->
               <div class="metaStack">
                 <div class="metaRow">
                   <div class="metaLabel">App:</div>
@@ -2084,6 +1998,7 @@ def jobs_page():
                 </div>
               </div>
 
+              <!-- rail RIGHT -->
               <div class="jobRail">
                 {run_now_button_html(j)}
                 {edit_btn}
