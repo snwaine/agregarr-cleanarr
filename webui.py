@@ -861,7 +861,7 @@ BASE_HEAD = """
   .jobsGrid{
     display:grid; 
     gap: 12px;
-    grid-template-columns: repeat(auto-fit, minmax(345px, 460px) );
+    grid-template-columns: repeat(auto-fit, minmax(340px, 460px) );
     justify-content: center;
   }
   
@@ -916,7 +916,7 @@ BASE_HEAD = """
     padding: 12px 12px;
     background: var(--panel2);
     display: grid;
-    grid-template-columns: 1fr 65px;
+    grid-template-columns: 1fr 70px;
     gap: 12px;
     align-items: start;
   }
@@ -936,7 +936,7 @@ BASE_HEAD = """
   }
 
   .metaStack{ display:flex; flex-direction: column; gap: 6px; font-size: 11px; }
-  .metaRow{ display:flex; align-items: baseline; gap: 9px; line-height: 1.35; }
+  .metaRow{ display:flex; align-items: baseline; gap: 8px; line-height: 1.35; }
   .metaLabel{ width: 100px; color: var(--muted); flex: 0 0 auto; }
   .metaVal{ color: var(--text); flex: 1 1 auto; min-width: 0; word-break: break-word; }
 
