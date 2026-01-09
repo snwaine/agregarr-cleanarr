@@ -584,18 +584,22 @@ BASE_HEAD = """
     flex-direction: column;
   }
   
-  /* Page cards should fill available vertical space */
   .pageBody > .grid{
     flex: 1 1 auto;
     min-height: 0;
-    align-content: stretch; /* keep grid behavior */
+    height: 100%;          /* ✅ add this */
+    align-content: stretch;
+    align-items: stretch;  /* ✅ add this (important for grid items) */
   }
 
   .pageBody > .grid > .card{
-    height: 100%;
+    align-self: stretch;   /* ✅ ensure it stretches in the grid track */
+    height: auto;          /* ✅ remove the 100% dependency */
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     overflow: hidden;
+    min-height: 0;         /* ✅ important for bd scrolling */
   }
 
   body[data-theme="dark"] { color-scheme: dark; }
