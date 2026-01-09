@@ -572,7 +572,11 @@ BASE_HEAD = """
     height: 140px;
     pointer-events: none;
     background: linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,.35));
+    z-index: 0;
   }
+
+  .wrap, .modalBack, .toastHost { position: relative; z-index: 1; }
+  
   body[data-theme="light"]:after{
     background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(0,0,0,.08));
   }
@@ -890,7 +894,7 @@ BASE_HEAD = """
    @media (min-width: 1200px){ .jobsGrid{ grid-template-columns: repeat(3, minmax(300px, 1fr)); gap: 16px;}}
   
   /* Ultrawide: 4 per row */
-  @media (min-width: 1600px){ .jobsGrid{ grid-template-columns: repeat(4, minmax(300px, 1fr)); gap: 20px;}}
+  @media (min-width: 1800px){ .jobsGrid{ grid-template-columns: repeat(4, minmax(300px, 1fr)); gap: 20px;}}
 
   [data-theme="light"] .jobCard{ background: #ffffff; }
 
@@ -957,6 +961,7 @@ BASE_HEAD = """
     justify-content:center;
     z-index: 9999;
     padding: 18px;
+    overscroll-behavior: contain;
   }
   .modal{
     width: min(720px, 100%);
@@ -997,6 +1002,7 @@ BASE_HEAD = """
     flex: 1 1 auto;
     min-height: 0;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
   .modal .mf{
     padding: 14px 16px;
