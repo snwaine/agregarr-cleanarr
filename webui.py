@@ -858,10 +858,9 @@ BASE_HEAD = """
 
   .disabledSection{ opacity: .55; filter: grayscale(.12); pointer-events: none; }
 
-  .jobsGrid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+  .jobsGrid{ display:grid; grid-template-columns: repeat( auto-fit, minmax(360px, 420px); justify-content: center; gap: 14px; }
   
   .jobCard{
-    grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
     background: var(--panel2);
@@ -878,7 +877,7 @@ BASE_HEAD = """
   /* Ultrawide: 4 per row */
   @media (min-width: 1800px){ .jobCard{ grid-column: span 3; } }
   @media (min-width: 1800px){ .jobsGrid{ gap: 20px; } }
-  
+
   [data-theme="light"] .jobCard{ background: #ffffff; }
 
   .jobHeader{

@@ -859,14 +859,26 @@ BASE_HEAD = """
   .disabledSection{ opacity: .55; filter: grayscale(.12); pointer-events: none; }
 
   .jobsGrid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+  
   .jobCard{
     grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
     background: var(--panel2);
     overflow:hidden;
+    max-width: 520px;
   }
-  @media(min-width: 900px){ .jobCard{ grid-column: span 6; } }
+  
+  /* Tablet / small desktop: 2 per row */
+  @media (min-width: 700px){ .jobCard{ grid-column: span 6; } }
+
+  /* Large desktop: 3 per row */
+  @media(min-width: 1200px){ .jobCard{ grid-column: span 4; } }
+  
+  /* Ultrawide: 4 per row */
+  @media (min-width: 1800px){ .jobCard{ grid-column: span 3; } }
+  @media (min-width: 1800px){ .jobsGrid{ gap: 20px; } }
+  
   [data-theme="light"] .jobCard{ background: #ffffff; }
 
   .jobHeader{
