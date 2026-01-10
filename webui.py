@@ -279,6 +279,7 @@ def load_config() -> Dict[str, Any]:
 
         "HTTP_TIMEOUT_SECONDS": int(env_default("HTTP_TIMEOUT_SECONDS", "30")),
         "UI_THEME": env_default("UI_THEME", "dark"),
+        "UI_SCALE": float(env_default("UI_SCALE", "1.0")),
         "RADARR_OK": False,
         "SONARR_OK": False,
         "JOBS": [],
@@ -301,6 +302,14 @@ def load_config() -> Dict[str, Any]:
     cfg["RADARR_ENABLED"] = bool(cfg.get("RADARR_ENABLED", True))
     cfg["SONARR_ENABLED"] = bool(cfg.get("SONARR_ENABLED", False))
     cfg["HTTP_TIMEOUT_SECONDS"] = clamp_int(cfg.get("HTTP_TIMEOUT_SECONDS", 30), 5, 300, 30)
+    try:
+        cfg["UI_SCALE"] = float(cfg.get("UI_SCALE", 1.0))
+    except Exception:
+        cfg["UI_SCALE"] = 1.0
+    if cfg["UI_SCALE"] < 0.75:
+        cfg["UI_SCALE"] = 0.75
+    if cfg["UI_SCALE"] > 1.5:
+        cfg["UI_SCALE"] = 1.5
 
     jobs = cfg.get("JOBS") or []
     if not isinstance(jobs, list):
@@ -523,6 +532,47 @@ BASE_HEAD = """
     --warn:#f59e0b;
     --bad:#ef4444;
     --shadow: 0 12px 28px rgba(0,0,0,.28);
+
+        /* UI Scale */
+    --ui: 1;
+
+    --fs-0: calc(12px * var(--ui));
+    --fs-1: calc(13px * var(--ui));
+    --fs-2: calc(14px * var(--ui));
+    --fs-3: calc(16px * var(--ui));
+
+    --pill-fs: var(--fs-1);
+    --pill-py: calc(8px * var(--ui));
+    --pill-px: calc(11px * var(--ui));
+
+    --btn-fs: calc(10px * var(--ui));
+    --btn-py: calc(7px * var(--ui));
+    --btn-px: calc(9px * var(--ui));
+    --btn-radius: calc(9px * var(--ui));
+    --btn-gap: calc(6px * var(--ui));
+
+    --switch-w: calc(42px * var(--ui));
+    --switch-h: calc(20px * var(--ui));
+    --switch-thumb: calc(14px * var(--ui));
+    --switch-pad: calc(3px * var(--ui));
+    --switch-travel: calc(var(--switch-w) - var(--switch-thumb) - (var(--switch-pad) * 2));
+
+    *, *::before, *::after { box-sizing: border-box; }
+    
+    /* Allow grid children to shrink inside columns */
+    .form { grid-template-columns: minmax(0, 1fr); }
+    @media (min-width: 900px){ .form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }}
+    /* Inputs/selects should never overflow their field */
+    .field input[type=text],
+    .field input[type=password],
+    .field input[type=number],
+    .field select,
+    .field textarea{
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    }
+
   }
 
   [data-theme="light"]{
@@ -577,6 +627,34 @@ BASE_HEAD = """
     background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(0,0,0,.08));
   }
 
+  .pageBody{
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .pageBody > .grid{
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;          /* ✅ add this */
+    align-content: stretch;
+    align-items: stretch;  /* ✅ add this (important for grid items) */
+  }
+
+  .pageBody > .grid > .card{
+    align-self: stretch;   /* ✅ ensure it stretches in the grid track */
+    height: auto;          /* ✅ remove the 100% dependency */
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    overflow: hidden;
+    min-height: 0;         /* ✅ important for bd scrolling */
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    box-shadow: 0 12px 28px rgba(0,0,0,.28), inset 0 -1px 0 rgba(255,255,255,.04);
+  }
+
   body[data-theme="dark"] { color-scheme: dark; }
   body[data-theme="light"] { color-scheme: light; }
 
@@ -584,12 +662,14 @@ BASE_HEAD = """
   a:hover{ text-decoration: underline; }
 
   .wrap{
-    max-width: 1200px;
+    max-width: min(1900px, 98vw);
     margin: 0 auto;
-    padding: 22px 18px 36px;
+    padding: 22px 18px 0px;
     width: 100%;
-    flex: 1 0 auto; /* fills remaining height */
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
   }
 
   .topbar{
@@ -605,6 +685,7 @@ BASE_HEAD = """
     z-index: 20;
     backdrop-filter: blur(10px);
   }
+
   .brand{ display:flex; align-items:center; gap:12px; }
   .logoWrap{
     width: 38px; height: 38px; border-radius: 12px;
@@ -626,16 +707,16 @@ BASE_HEAD = """
     background: var(--panel2);
   }
 
-  .title h1{ margin:0; font-size: 16px; letter-spacing:.2px; }
-  .title .sub{ color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .title h1{ margin:0; font-size: var(--fs-3); letter-spacing:.2px; }
+  .title .sub{ color: var(--muted); font-size: var(--fs-0); margin-top: 2px; }
 
   .nav{ display:flex; align-items:center; gap:8px; flex-wrap: wrap; justify-content: flex-end; }
   .pill{
     border: 1px solid var(--line2);
     background: var(--panel2);
-    padding: 8px 11px;
+    padding: var(--pill-py) var(--pill-px);
     border-radius: 999px;
-    font-size: 13px;
+    font-size: var(--pill-fs);
     cursor: pointer;
     color: var(--text);
   }
@@ -653,6 +734,7 @@ BASE_HEAD = """
     background: var(--panel);
     box-shadow: var(--shadow);
     overflow:hidden;
+    flex: 0 0 auto;
   }
   .card .hd{
     padding: 14px 16px;
@@ -660,27 +742,34 @@ BASE_HEAD = """
     display:flex; align-items:center; justify-content: space-between;
     gap:12px;
     background: var(--panel2);
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: hidden;
   }
   [data-theme="light"] .card .hd{ background: #f3f4f6; }
   .card .hd h2{ margin:0; font-size: 14px; letter-spacing:.2px; }
-  .card .bd{ padding: 14px 16px; background: var(--panel); }
+  .card .bd{ padding: 14px 16px; background: var(--panel); flex: 1 1 auto; min-height: 0; overflow: auto; }
 
   .muted{ color: var(--muted); }
 
   .btnrow{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
+  
   .btn{
     border: 1px solid var(--line2);
     background: var(--panel2);
     color: var(--text);
-    padding: 10px 12px;
-    border-radius: 12px;
-    cursor:pointer;
+
+    padding: var(--btn-py) var(--btn-px);
+    border-radius: var(--btn-radius);
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--btn-fs);
+    gap: var(--btn-gap);
+
+    cursor:pointer;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
   }
+
   a.btn:hover{ text-decoration: none; }
 
   .btn{
@@ -776,7 +865,7 @@ BASE_HEAD = """
     background: var(--panel2);
   }
   [data-theme="light"] .check{ background: #ffffff; }
-  .check input{ transform: scale(1.2); }
+  .check input{ transform: scale(calc(1.2 * var(--ui))); }
 
   .toggleRow{
     display:flex;
@@ -791,42 +880,69 @@ BASE_HEAD = """
   }
   [data-theme="light"] .toggleRow{ background: #ffffff; }
 
-  .switch{ position: relative; width: 52px; height: 30px; display: inline-block; flex: 0 0 auto; }
+  .switch{ position: relative; width: var(--switch-w); height: var(--switch-h); display: inline-block; flex: 0 0 auto; }
+
   .switch input{ opacity: 0; width: 0; height: 0; }
   .slider{
-    position:absolute; cursor:pointer; inset:0;
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
     background: rgba(255,255,255,.10);
     border: 1px solid var(--line2);
     transition: .18s ease;
     border-radius: 999px;
   }
   .slider:before{
-    position:absolute; content:"";
-    height: 22px; width: 22px;
-    left: 4px; top: 50%;
+    position: absolute;
+    content: "";
+    height: var(--switch-thumb);
+    width: var(--switch-thumb);
+    left: var(--switch-pad);
+    top: 50%;
     transform: translateY(-50%);
     background: rgba(255,255,255,.85);
     border-radius: 999px;
     transition: .18s ease;
-    box-shadow: 0 6px 14px rgba(0,0,0,.25);
+    box-shadow: 0 4px 10px rgba(0,0,0,.25);
   }
   .switch input:checked + .slider{
-    background: linear-gradient(135deg, rgba(34,197,94,.60), rgba(22,163,74,.35));
+    background: linear-gradient(
+      135deg,
+      rgba(34,197,94,.60),
+      rgba(22,163,74,.35)
+    );
     border-color: rgba(34,197,94,.55);
   }
-  .switch input:checked + .slider:before{ transform: translate(22px, -50%); background: rgba(255,255,255,.92); }
+
+  .switch input:checked + .slider:before{ transform: translate(var(--switch-travel), -50%); background: rgba(255,255,255,.92); }
 
   .disabledSection{ opacity: .55; filter: grayscale(.12); pointer-events: none; }
 
-  .jobsGrid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+  .jobsGrid{
+    display:grid; 
+    gap: 12px;
+    grid-template-columns: 1fr;
+    justify-content: center;
+  }
+  
   .jobCard{
-    grid-column: span 12;
     border: 1px solid var(--line);
     border-radius: 16px;
     background: var(--panel2);
     overflow:hidden;
+    max-width: none;
+    width: 100%;
   }
-  @media(min-width: 900px){ .jobCard{ grid-column: span 6; } }
+  
+  /* Tablet / small desktop: 2 per row */
+  @media (min-width: 700px){ .jobsGrid{ grid-template-columns: repeat(2, minmax(300px, 1fr));}}
+
+  /* Large desktop: 3 per row */
+   @media (min-width: 1200px){ .jobsGrid{ grid-template-columns: repeat(3, minmax(300px, 1fr)); gap: 16px;}}
+  
+  /* Ultrawide: 4 per row */
+  @media (min-width: 1800px){ .jobsGrid{ grid-template-columns: repeat(4, minmax(300px, 1fr)); gap: 20px;}}
+
   [data-theme="light"] .jobCard{ background: #ffffff; }
 
   .jobHeader{
@@ -859,7 +975,7 @@ BASE_HEAD = """
     padding: 12px 12px;
     background: var(--panel2);
     display: grid;
-    grid-template-columns: 1fr 80px;
+    grid-template-columns: 1fr 70px;
     gap: 12px;
     align-items: start;
   }
@@ -878,9 +994,10 @@ BASE_HEAD = """
     padding: 10px 8px;
   }
 
-  .metaStack{ display:flex; flex-direction: column; gap: 6px; font-size: 13px; }
-  .metaRow{ display:flex; align-items: baseline; gap: 10px; line-height: 1.35; }
-  .metaLabel{ width: 130px; color: var(--muted); flex: 0 0 auto; }
+  .metaStack{ display:flex; flex-direction: column; gap: 6px; font-size: calc(11px * var(--ui)); }
+
+  .metaRow{ display:flex; align-items: baseline; gap: 8px; line-height: 1.35; }
+  .metaLabel{ width: 100px; color: var(--muted); flex: 0 0 auto; }
   .metaVal{ color: var(--text); flex: 1 1 auto; min-width: 0; word-break: break-word; }
 
   .modalBack{
@@ -945,7 +1062,7 @@ BASE_HEAD = """
   [data-theme="light"] .modal .mf{ background: #f3f4f6; }
 
   table{ width:100%; border-collapse: collapse; overflow:hidden; border-radius: 14px; border: 1px solid var(--line); }
-  th, td{ padding: 10px 10px; border-bottom: 1px solid var(--line); font-size: 13px; vertical-align: top; }
+  th, td{ padding: 10px 10px; border-bottom: 1px solid var(--line); font-size: var(--fs-1); vertical-align: top; }
   th{ text-align:left; color:#cbd5e1; background: rgba(255,255,255,.04); position: sticky; top: 0; }
   [data-theme="light"] th{ color:#111827; background: rgba(0,0,0,.03); }
   .tablewrap{ max-height: 420px; overflow:auto; border-radius: 14px; border: 1px solid var(--line); }
@@ -968,7 +1085,7 @@ BASE_HEAD = """
     box-shadow: var(--shadow);
     border-radius: 14px;
     padding: 12px 12px;
-    font-size: 13px;
+    font-size: var(--fs-1);
     color: var(--text);
     opacity: 0;
     transform: translateY(10px);
@@ -1350,6 +1467,21 @@ BASE_HEAD = """
       const appKey = appSel ? (appSel.value || "radarr") : "radarr";
       updateSonarrModeVisibility(appKey);
     }
+
+        // UI scale live preview
+    const uiScale = $("uiScale");
+    const uiScaleVal = $("uiScaleVal");
+    function applyUiScale(v){
+      const n = Math.max(0.75, Math.min(1.5, Number(v) || 1));
+      document.documentElement.style.setProperty("--ui", String(n));
+      if (uiScaleVal) uiScaleVal.textContent = Math.round(n * 100) + "%";
+    }
+    if (uiScale){
+      applyUiScale(uiScale.value);
+      uiScale.addEventListener("input", (e) => applyUiScale(e.target.value));
+      uiScale.addEventListener("change", (e) => applyUiScale(e.target.value));
+    }
+
   });
 </script>
 """
@@ -1396,7 +1528,7 @@ def shell(page_title: str, active: str, body: str):
   <title>{safe_html(page_title)}</title>
   {BASE_HEAD}
 </head>
-<body data-theme="{safe_html(theme)}">
+<body data-theme="{safe_html(theme)}" style="--ui:{cfg.get('UI_SCALE',1.0)};">
   <div class="wrap">
     <div class="topbar">
       <div class="brand">
@@ -1409,8 +1541,9 @@ def shell(page_title: str, active: str, body: str):
       <div class="nav">{nav}</div>
     </div>
 
-    {body}
-  </div>
+    <div class="pageBody">
+      {body}
+    </div>
 
   {toasts}
 </body>
@@ -1726,7 +1859,17 @@ def settings():
                              value="{cfg["HTTP_TIMEOUT_SECONDS"]}"
                              data-initial="{cfg["HTTP_TIMEOUT_SECONDS"]}">
                     </div>
-
+                    <div class="field">
+                      <label>UI Scale <span class="muted" id="uiScaleVal" style="margin-left:6px;"></span></label>
+                      <input id="uiScale"
+                             type="range"
+                             min="0.75"
+                             max="1.5"
+                             step="0.05"
+                             name="UI_SCALE"
+                             value="{safe_html(str(cfg.get('UI_SCALE', 1.0)))}"
+                             data-initial="{safe_html(str(cfg.get('UI_SCALE', 1.0)))}">
+                    </div>
                     <div class="field">
                       <label>UI Theme</label>
                       <select name="UI_THEME" data-initial="{safe_html(cfg.get("UI_THEME","dark"))}">
@@ -1765,6 +1908,16 @@ def save_settings():
 
     cfg["HTTP_TIMEOUT_SECONDS"] = clamp_int(request.form.get("HTTP_TIMEOUT_SECONDS") or 30, 5, 300, 30)
     cfg["UI_THEME"] = (request.form.get("UI_THEME") or cfg.get("UI_THEME", "dark")).lower()
+    
+    try:
+        cfg["UI_SCALE"] = float(request.form.get("UI_SCALE") or cfg.get("UI_SCALE", 1.0))
+    except Exception:
+        cfg["UI_SCALE"] = float(cfg.get("UI_SCALE", 1.0))
+    if cfg["UI_SCALE"] < 0.75:
+        cfg["UI_SCALE"] = 0.75
+    if cfg["UI_SCALE"] > 1.5:
+        cfg["UI_SCALE"] = 1.5
+    
     if cfg["UI_THEME"] not in ("dark", "light"):
         cfg["UI_THEME"] = "dark"
 
