@@ -280,6 +280,10 @@ def load_config() -> Dict[str, Any]:
         "HTTP_TIMEOUT_SECONDS": int(env_default("HTTP_TIMEOUT_SECONDS", "30")),
         "UI_THEME": env_default("UI_THEME", "dark"),
         "UI_SCALE": float(env_default("UI_SCALE", "1.0")),
+
+        # ✅ NEW: layout switch (classic topbar vs radarr sidebar)
+        "UI_LAYOUT": env_default("UI_LAYOUT", "classic"),  # classic | radarr
+
         "RADARR_OK": False,
         "SONARR_OK": False,
         "JOBS": [],
@@ -297,6 +301,9 @@ def load_config() -> Dict[str, Any]:
     t = (cfg.get("UI_THEME") or "dark").lower()
     # ✅ third theme option added: "reaparr"
     cfg["UI_THEME"] = t if t in ("dark", "light", "reaparr") else "dark"
+
+    lay = (cfg.get("UI_LAYOUT") or "classic").lower()
+    cfg["UI_LAYOUT"] = lay if lay in ("classic", "radarr") else "classic"
 
     cfg["RADARR_OK"] = bool(cfg.get("RADARR_OK", False))
     cfg["SONARR_OK"] = bool(cfg.get("SONARR_OK", False))
@@ -708,6 +715,126 @@ BASE_HEAD = """
     min-height: 100vh;
   }
 
+  /* ---------------------------
+     ✅ NEW: Radarr-like layout
+  --------------------------- */
+  .layoutRadarr{
+    display:grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    min-height: calc(100vh - 22px);
+  }
+
+  .sidebar{
+    position: sticky;
+    top: 14px;
+    align-self: start;
+    height: calc(100vh - 28px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    overflow:hidden;
+    display:flex;
+    flex-direction: column;
+  }
+
+  .sidebar .sbHd{
+    padding: 14px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel2);
+    display:flex;
+    gap: 12px;
+    align-items:center;
+  }
+
+  .sbNav{
+    padding: 10px;
+    display:flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sbItem{
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel2);
+    font-size: var(--fs-1);
+    cursor:pointer;
+  }
+  .sbItem:hover{
+    border-color: rgba(34,197,94,.45);
+    box-shadow: 0 0 0 3px rgba(34,197,94,.10);
+    text-decoration: none;
+  }
+  body[data-theme="reaparr"] .sbItem:hover{
+    border-color: rgba(38,224,138,.45);
+    box-shadow: 0 0 0 3px rgba(38,224,138,.10);
+  }
+  .sbItem.active{
+    border-color: rgba(34,197,94,.55);
+    box-shadow: 0 0 0 3px rgba(34,197,94,.16);
+  }
+  body[data-theme="reaparr"] .sbItem.active{
+    border-color: rgba(38,224,138,.55);
+    box-shadow: 0 0 0 3px rgba(38,224,138,.16);
+  }
+
+  .sbNav form{ margin: 0; }
+  button.sbItem{
+    width: 100%;
+    text-align: left;
+    color: var(--text);
+  }
+
+  .mainArea{
+    min-width: 0;
+    display:flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .pageTop{
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    overflow:hidden;
+  }
+  .pageTop .ptIn{
+    padding: 14px 16px;
+    background: var(--panel2);
+    border-bottom: 1px solid var(--line);
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .pageTop .ptIn h2{
+    margin:0;
+    font-size: var(--fs-3);
+    letter-spacing:.2px;
+  }
+  .pageTop .ptBd{
+    padding: 10px 16px;
+    color: var(--muted);
+    font-size: var(--fs-1);
+  }
+
+  @media (max-width: 900px){
+    .layoutRadarr{ grid-template-columns: 1fr; }
+    .sidebar{ position: relative; height: auto; }
+  }
+
+  /* ---------------------------
+     Existing classic topbar
+  --------------------------- */
   .topbar{
     display:flex; align-items:center; justify-content: space-between;
     gap:12px;
@@ -1583,7 +1710,7 @@ BASE_HEAD = """
       updateSonarrModeVisibility(appKey);
     }
 
-        // UI scale live preview
+    // UI scale live preview
     const uiScale = $("uiScale");
     const uiScaleVal = $("uiScaleVal");
     function applyUiScale(v){
@@ -1608,26 +1735,33 @@ def shell(page_title: str, active: str, body: str):
     if theme not in ("dark", "light", "reaparr"):
         theme = "dark"
 
+    layout = (cfg.get("UI_LAYOUT") or "classic").lower()
+    if layout not in ("classic", "radarr"):
+        layout = "classic"
+
     def pill(name, href, key):
         cls = "pill active" if active == key else "pill"
+        return f'<a class="{cls}" href="{href}">{safe_html(name)}</a>'
+
+    def sb_item(name, href, key):
+        cls = "sbItem active" if active == key else "sbItem"
         return f'<a class="{cls}" href="{href}">{safe_html(name)}</a>'
 
     # ✅ Cycle themes: dark -> light -> reaparr -> dark
     next_theme = {"dark": "light", "light": "reaparr", "reaparr": "dark"}.get(theme, "dark")
     next_label = {"dark": "Dark", "light": "Light", "reaparr": "Reaparr"}.get(next_theme, "Dark")
-    theme_btn = f"""
+
+    theme_btn_pill = f"""
       <form method="post" action="/toggle-theme" style="margin:0;">
         <button class="pill" type="submit">Theme: {safe_html(next_label)}</button>
       </form>
     """
 
-    nav = (
-        pill("Dashboard", "/dashboard", "dash")
-        + pill("Jobs", "/jobs", "jobs")
-        + pill("Settings", "/settings", "settings")
-        + pill("Status", "/status", "status")
-        + theme_btn
-    )
+    theme_btn_sidebar = f"""
+      <form method="post" action="/toggle-theme">
+        <button class="sbItem" type="submit">Theme: {safe_html(next_label)}</button>
+      </form>
+    """
 
     has_logo = find_logo_path() is not None
     logo_html = (
@@ -1636,7 +1770,75 @@ def shell(page_title: str, active: str, body: str):
         else '<div class="logoBadge"></div>'
     )
 
+    # Small page title for Radarr layout
+    page_name = {
+        "dash": "Dashboard",
+        "jobs": "Jobs",
+        "settings": "Settings",
+        "status": "Status",
+    }.get(active, "mediareaparr")
+
     toasts = render_toasts()
+
+    if layout == "radarr":
+        sidebar = f"""
+          <div class="sidebar">
+            <div class="sbHd">
+              {logo_html}
+              <div style="min-width:0;">
+                <div style="font-weight:900; letter-spacing:.2px;">mediareaparr</div>
+                <div class="muted" style="font-size:var(--fs-0); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                  Radarr/Sonarr cleanup
+                </div>
+              </div>
+            </div>
+            <div class="sbNav">
+              {sb_item("Dashboard", "/dashboard", "dash")}
+              {sb_item("Jobs", "/jobs", "jobs")}
+              {sb_item("Settings", "/settings", "settings")}
+              {sb_item("Status", "/status", "status")}
+              <div style="height:6px;"></div>
+              {theme_btn_sidebar}
+            </div>
+          </div>
+        """
+
+        return f"""
+<!doctype html>
+<html>
+<head>
+  <title>{safe_html(page_title)}</title>
+  {BASE_HEAD}
+</head>
+<body data-theme="{safe_html(theme)}" style="--ui:{cfg.get('UI_SCALE',1.0)};">
+  <div class="wrap">
+    <div class="layoutRadarr">
+      {sidebar}
+      <div class="mainArea">
+        <div class="pageTop">
+          <div class="ptIn">
+            <h2>{safe_html(page_name)}</h2>
+            <div class="muted" style="font-size:var(--fs-0);">Layout: <b>Radarr</b></div>
+          </div>
+          <div class="ptBd">Same MediaReaparr colour scheme • sidebar navigation</div>
+        </div>
+        {body}
+      </div>
+    </div>
+  </div>
+  {toasts}
+</body>
+</html>
+"""
+
+    # Classic topbar layout
+    nav = (
+        pill("Dashboard", "/dashboard", "dash")
+        + pill("Jobs", "/jobs", "jobs")
+        + pill("Settings", "/settings", "settings")
+        + pill("Status", "/status", "status")
+        + theme_btn_pill
+    )
 
     return f"""
 <!doctype html>
@@ -1661,6 +1863,7 @@ def shell(page_title: str, active: str, body: str):
     <div class="pageBody">
       {body}
     </div>
+  </div>
 
   {toasts}
 </body>
@@ -1822,6 +2025,8 @@ def settings():
     radarr_enabled = bool(cfg.get("RADARR_ENABLED", True))
     sonarr_enabled = bool(cfg.get("SONARR_ENABLED", False))
 
+    layout_is_radarr = (cfg.get("UI_LAYOUT") == "radarr")
+
     test_label = "Connected" if radarr_ok else "Test Connection"
     test_disabled_attr = "disabled" if radarr_ok else ""
     test_title = "Radarr connection is OK" if radarr_ok else "Test Radarr connection"
@@ -1970,6 +2175,23 @@ def settings():
                   <div class="muted">Global settings</div>
                 </div>
                 <div class="bd">
+
+                  <!-- ✅ NEW: Layout switch -->
+                  <div class="toggleRow">
+                    <div>
+                      <div style="font-weight:800;">Radarr layout</div>
+                      <div class="muted">Sidebar navigation + Radarr-like structure.</div>
+                    </div>
+                    <label class="switch" title="Toggle Radarr layout">
+                      <input id="ui_layout_radarr"
+                             name="UI_LAYOUT_RADARR"
+                             type="checkbox"
+                             {"checked" if layout_is_radarr else ""}
+                             data-initial="{ '1' if layout_is_radarr else '0' }">
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+
                   <div class="form">
                     <div class="field">
                       <label>HTTP Timeout Seconds</label>
@@ -2027,7 +2249,10 @@ def save_settings():
 
     cfg["HTTP_TIMEOUT_SECONDS"] = clamp_int(request.form.get("HTTP_TIMEOUT_SECONDS") or 30, 5, 300, 30)
     cfg["UI_THEME"] = (request.form.get("UI_THEME") or cfg.get("UI_THEME", "dark")).lower()
-    
+
+    # ✅ NEW: save layout toggle
+    cfg["UI_LAYOUT"] = "radarr" if checkbox("UI_LAYOUT_RADARR") else "classic"
+
     try:
         cfg["UI_SCALE"] = float(request.form.get("UI_SCALE") or cfg.get("UI_SCALE", 1.0))
     except Exception:
@@ -2036,9 +2261,12 @@ def save_settings():
         cfg["UI_SCALE"] = 0.75
     if cfg["UI_SCALE"] > 1.5:
         cfg["UI_SCALE"] = 1.5
-    
+
     if cfg["UI_THEME"] not in ("dark", "light", "reaparr"):
         cfg["UI_THEME"] = "dark"
+
+    if cfg["UI_LAYOUT"] not in ("classic", "radarr"):
+        cfg["UI_LAYOUT"] = "classic"
 
     if old.get("RADARR_URL") != cfg["RADARR_URL"] or old.get("RADARR_API_KEY") != cfg["RADARR_API_KEY"]:
         cfg["RADARR_OK"] = False
