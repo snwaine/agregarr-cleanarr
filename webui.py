@@ -278,12 +278,9 @@ def load_config() -> Dict[str, Any]:
         "SONARR_ENABLED": False,
 
         "HTTP_TIMEOUT_SECONDS": int(env_default("HTTP_TIMEOUT_SECONDS", "30")),
-        "UI_THEME": env_default("UI_THEME", "dark"),
+        # ✅ Make Radarr-style layout the default primary (reaparr)
+        "UI_THEME": env_default("UI_THEME", "reaparr"),
         "UI_SCALE": float(env_default("UI_SCALE", "1.0")),
-
-        # ✅ NEW: layout switch (classic topbar vs radarr sidebar)
-        "UI_LAYOUT": env_default("UI_LAYOUT", "classic"),  # classic | radarr
-
         "RADARR_OK": False,
         "SONARR_OK": False,
         "JOBS": [],
@@ -298,12 +295,8 @@ def load_config() -> Dict[str, Any]:
         except Exception:
             pass
 
-    t = (cfg.get("UI_THEME") or "dark").lower()
-    # ✅ third theme option added: "reaparr"
-    cfg["UI_THEME"] = t if t in ("dark", "light", "reaparr") else "dark"
-
-    lay = (cfg.get("UI_LAYOUT") or "classic").lower()
-    cfg["UI_LAYOUT"] = lay if lay in ("classic", "radarr") else "classic"
+    t = (cfg.get("UI_THEME") or "reaparr").lower()
+    cfg["UI_THEME"] = t if t in ("dark", "light", "reaparr") else "reaparr"
 
     cfg["RADARR_OK"] = bool(cfg.get("RADARR_OK", False))
     cfg["SONARR_OK"] = bool(cfg.get("SONARR_OK", False))
@@ -541,8 +534,12 @@ BASE_HEAD = """
     --bad:#ef4444;
     --shadow: 0 12px 28px rgba(0,0,0,.28);
 
-        /* UI Scale */
+    /* UI Scale */
     --ui: 1;
+
+    /* ✅ locked page width + equal gap all around (same on every page) */
+    --page-w: 1600px;
+    --page-pad: 18px;
 
     --fs-0: calc(12px * var(--ui));
     --fs-1: calc(13px * var(--ui));
@@ -566,21 +563,21 @@ BASE_HEAD = """
     --switch-travel: calc(var(--switch-w) - var(--switch-thumb) - (var(--switch-pad) * 2));
 
     *, *::before, *::after { box-sizing: border-box; }
-    
+
     /* Allow grid children to shrink inside columns */
     .form { grid-template-columns: minmax(0, 1fr); }
-    @media (min-width: 900px){ .form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }}
+    @media (min-width: 900px){ .form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
     /* Inputs/selects should never overflow their field */
     .field input[type=text],
     .field input[type=password],
     .field input[type=number],
     .field select,
     .field textarea{
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
     }
-
   }
 
   [data-theme="light"]{
@@ -592,15 +589,16 @@ BASE_HEAD = """
     --line:#e5e7eb;
     --line2:#d1d5db;
 
-    --accent:#6d28d9;
-    --accent2:#7c3aed;
+    /* ✅ remove “Radarr purple” feel; keep MediaReaparr green */
+    --accent:#22c55e;
+    --accent2:#16a34a;
 
     --warn:#d97706;
     --bad:#dc2626;
     --shadow: 0 12px 30px rgba(0,0,0,.08);
   }
 
-  /* ✅ Third theme: Reaparr (Radarr-style dark + MediaReaparr green) */
+  /* ✅ Third theme: Reaparr (Radarr-style dark layout + MediaReaparr green) */
   [data-theme="reaparr"]{
     --bg:#070a0d;
     --panel:#0f1620;
@@ -620,9 +618,7 @@ BASE_HEAD = """
     --shadow: 0 12px 28px rgba(0,0,0,.55);
   }
 
-  html, body{
-    height: 100%;
-  }
+  html, body{ height: 100%; }
 
   body{
     min-height: 100vh;
@@ -664,7 +660,6 @@ BASE_HEAD = """
   body[data-theme="light"]:after{
     background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(0,0,0,.08));
   }
-  /* ✅ Reaparr landing fade matches deep bg */
   body[data-theme="reaparr"]:after{
     background: linear-gradient(to bottom, rgba(7,10,13,0), rgba(7,10,13,.92));
   }
@@ -675,7 +670,7 @@ BASE_HEAD = """
     display: flex;
     flex-direction: column;
   }
-  
+
   .pageBody > .grid{
     flex: 1 1 auto;
     min-height: 0;
@@ -704,137 +699,18 @@ BASE_HEAD = """
   a{ color: var(--text); text-decoration: none; }
   a:hover{ text-decoration: underline; }
 
+  /* ✅ fixed width + equal gap on all sides (same on every page) */
   .wrap{
-    max-width: min(1900px, 98vw);
-    margin: 0 auto;
-    padding: 22px 18px 0px;
+    max-width: var(--page-w);
     width: 100%;
+    margin: 0 auto;
+    padding: var(--page-pad);
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     min-height: 100vh;
   }
 
-  /* ---------------------------
-     ✅ NEW: Radarr-like layout
-  --------------------------- */
-  .layoutRadarr{
-    display:grid;
-    grid-template-columns: 260px minmax(0, 1fr);
-    gap: 14px;
-    align-items: start;
-    min-height: calc(100vh - 22px);
-  }
-
-  .sidebar{
-    position: sticky;
-    top: 14px;
-    align-self: start;
-    height: calc(100vh - 28px);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    background: var(--panel);
-    box-shadow: var(--shadow);
-    overflow:hidden;
-    display:flex;
-    flex-direction: column;
-  }
-
-  .sidebar .sbHd{
-    padding: 14px 14px;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel2);
-    display:flex;
-    gap: 12px;
-    align-items:center;
-  }
-
-  .sbNav{
-    padding: 10px;
-    display:flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .sbItem{
-    display:flex;
-    align-items:center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: var(--panel2);
-    font-size: var(--fs-1);
-    cursor:pointer;
-  }
-  .sbItem:hover{
-    border-color: rgba(34,197,94,.45);
-    box-shadow: 0 0 0 3px rgba(34,197,94,.10);
-    text-decoration: none;
-  }
-  body[data-theme="reaparr"] .sbItem:hover{
-    border-color: rgba(38,224,138,.45);
-    box-shadow: 0 0 0 3px rgba(38,224,138,.10);
-  }
-  .sbItem.active{
-    border-color: rgba(34,197,94,.55);
-    box-shadow: 0 0 0 3px rgba(34,197,94,.16);
-  }
-  body[data-theme="reaparr"] .sbItem.active{
-    border-color: rgba(38,224,138,.55);
-    box-shadow: 0 0 0 3px rgba(38,224,138,.16);
-  }
-
-  .sbNav form{ margin: 0; }
-  button.sbItem{
-    width: 100%;
-    text-align: left;
-    color: var(--text);
-  }
-
-  .mainArea{
-    min-width: 0;
-    display:flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .pageTop{
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    background: var(--panel);
-    box-shadow: var(--shadow);
-    overflow:hidden;
-  }
-  .pageTop .ptIn{
-    padding: 14px 16px;
-    background: var(--panel2);
-    border-bottom: 1px solid var(--line);
-    display:flex;
-    align-items:center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .pageTop .ptIn h2{
-    margin:0;
-    font-size: var(--fs-3);
-    letter-spacing:.2px;
-  }
-  .pageTop .ptBd{
-    padding: 10px 16px;
-    color: var(--muted);
-    font-size: var(--fs-1);
-  }
-
-  @media (max-width: 900px){
-    .layoutRadarr{ grid-template-columns: 1fr; }
-    .sidebar{ position: relative; height: auto; }
-  }
-
-  /* ---------------------------
-     Existing classic topbar
-  --------------------------- */
   .topbar{
     display:flex; align-items:center; justify-content: space-between;
     gap:12px;
@@ -844,9 +720,10 @@ BASE_HEAD = """
     background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
     box-shadow: var(--shadow);
     position: sticky;
-    top: 14px;
+    top: 0;                /* ✅ pinned inside the padded wrap */
     z-index: 20;
     backdrop-filter: blur(10px);
+    overflow: visible;     /* ✅ never internally scroll */
   }
 
   .brand{ display:flex; align-items:center; gap:12px; }
@@ -862,7 +739,6 @@ BASE_HEAD = """
     background: linear-gradient(135deg, rgba(34,197,94,.92), rgba(22,163,74,.65));
     box-shadow: 0 10px 24px rgba(34,197,94,.18);
   }
-  /* ✅ Reaparr badge uses your green */
   body[data-theme="reaparr"] .logoBadge{
     background: linear-gradient(135deg, rgba(38,224,138,.92), rgba(22,184,110,.65));
     box-shadow: 0 10px 24px rgba(38,224,138,.18);
@@ -879,7 +755,7 @@ BASE_HEAD = """
   .title h1{ margin:0; font-size: var(--fs-3); letter-spacing:.2px; }
   .title .sub{ color: var(--muted); font-size: var(--fs-0); margin-top: 2px; }
 
-  .nav{ display:flex; align-items:center; gap:8px; flex-wrap: wrap; justify-content: flex-end; }
+  .nav{ display:flex; align-items:center; gap:8px; flex-wrap: wrap; justify-content: flex-end; overflow: visible; }
   .pill{
     border: 1px solid var(--line2);
     background: var(--panel2);
@@ -893,7 +769,6 @@ BASE_HEAD = """
     border-color: rgba(34,197,94,.55);
     box-shadow: 0 0 0 3px rgba(34,197,94,.16);
   }
-  /* ✅ Reaparr pill glow uses your green */
   body[data-theme="reaparr"] .pill.active{
     border-color: rgba(38,224,138,.55);
     box-shadow: 0 0 0 3px rgba(38,224,138,.16);
@@ -924,7 +799,6 @@ BASE_HEAD = """
   .card .hd h2{ margin:0; font-size: 14px; letter-spacing:.2px; }
   .card .bd{ padding: 14px 16px; background: var(--panel); flex: 1 1 auto; min-height: 0; overflow: auto; }
 
-  /* ✅ Reaparr subtle highlight layers (Radarr-ish surface) */
   body[data-theme="reaparr"] .card,
   body[data-theme="reaparr"] .jobCard,
   body[data-theme="reaparr"] .modal{
@@ -941,7 +815,7 @@ BASE_HEAD = """
   .muted{ color: var(--muted); }
 
   .btnrow{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
-  
+
   .btn{
     border: 1px solid var(--line2);
     background: var(--panel2);
@@ -968,7 +842,6 @@ BASE_HEAD = """
     box-shadow: 0 0 0 3px rgba(34,197,94,.10), 0 10px 22px rgba(0,0,0,.22);
     transform: translateY(-1px);
   }
-  /* ✅ Reaparr hover glow uses your green */
   body[data-theme="reaparr"] .btn:hover{
     border-color: rgba(38,224,138,.55);
     box-shadow: 0 0 0 3px rgba(38,224,138,.10), 0 10px 22px rgba(0,0,0,.45);
@@ -1004,7 +877,6 @@ BASE_HEAD = """
     background: linear-gradient(135deg, rgba(239,68,68,.20), rgba(239,68,68,.08));
   }
 
-  /* ✅ Reaparr gradients for button variants */
   body[data-theme="reaparr"] .btn.primary,
   body[data-theme="reaparr"] .btn.good{
     border-color: rgba(38,224,138,.45);
@@ -1038,7 +910,6 @@ BASE_HEAD = """
     border-radius: 12px;
     outline: none;
   }
-  /* ✅ Reaparr inputs are deeper (less grey box) */
   body[data-theme="reaparr"] .field input[type=text],
   body[data-theme="reaparr"] .field input[type=password],
   body[data-theme="reaparr"] .field input[type=number],
@@ -1135,7 +1006,6 @@ BASE_HEAD = """
     );
     border-color: rgba(34,197,94,.55);
   }
-  /* ✅ Reaparr checked switch uses your green */
   body[data-theme="reaparr"] .switch input:checked + .slider{
     background: linear-gradient(
       135deg,
@@ -1145,17 +1015,20 @@ BASE_HEAD = """
     border-color: rgba(38,224,138,.55);
   }
 
-  .switch input:checked + .slider:before{ transform: translate(var(--switch-travel), -50%); background: rgba(255,255,255,.92); }
+  .switch input:checked + .slider:before{
+    transform: translate(var(--switch-travel), -50%);
+    background: rgba(255,255,255,.92);
+  }
 
   .disabledSection{ opacity: .55; filter: grayscale(.12); pointer-events: none; }
 
   .jobsGrid{
-    display:grid; 
+    display:grid;
     gap: 12px;
     grid-template-columns: 1fr;
     justify-content: center;
   }
-  
+
   .jobCard{
     border: 1px solid var(--line);
     border-radius: 16px;
@@ -1164,19 +1037,13 @@ BASE_HEAD = """
     max-width: none;
     width: 100%;
   }
-  
-  /* Tablet / small desktop: 2 per row */
-  @media (min-width: 700px){ .jobsGrid{ grid-template-columns: repeat(2, minmax(300px, 1fr));}}
 
-  /* Large desktop: 3 per row */
-   @media (min-width: 1200px){ .jobsGrid{ grid-template-columns: repeat(3, minmax(300px, 1fr)); gap: 16px;}}
-  
-  /* Ultrawide: 4 per row */
-  @media (min-width: 1800px){ .jobsGrid{ grid-template-columns: repeat(4, minmax(300px, 1fr)); gap: 20px;}}
+  @media (min-width: 700px){ .jobsGrid{ grid-template-columns: repeat(2, minmax(300px, 1fr)); } }
+  @media (min-width: 1200px){ .jobsGrid{ grid-template-columns: repeat(3, minmax(300px, 1fr)); gap: 16px; } }
+  @media (min-width: 1800px){ .jobsGrid{ grid-template-columns: repeat(4, minmax(300px, 1fr)); gap: 20px; } }
 
   [data-theme="light"] .jobCard{ background: #ffffff; }
 
-  /* ✅ Reaparr card lift + glow (Radarr-ish) */
   body[data-theme="reaparr"] .jobCard:hover,
   body[data-theme="reaparr"] .card:hover{
     border-color: rgba(38,224,138,.25);
@@ -1723,7 +1590,6 @@ BASE_HEAD = """
       uiScale.addEventListener("input", (e) => applyUiScale(e.target.value));
       uiScale.addEventListener("change", (e) => applyUiScale(e.target.value));
     }
-
   });
 </script>
 """
@@ -1731,37 +1597,30 @@ BASE_HEAD = """
 
 def shell(page_title: str, active: str, body: str):
     cfg = load_config()
-    theme = (cfg.get("UI_THEME") or "dark").lower()
+    theme = (cfg.get("UI_THEME") or "reaparr").lower()
     if theme not in ("dark", "light", "reaparr"):
-        theme = "dark"
-
-    layout = (cfg.get("UI_LAYOUT") or "classic").lower()
-    if layout not in ("classic", "radarr"):
-        layout = "classic"
+        theme = "reaparr"
 
     def pill(name, href, key):
         cls = "pill active" if active == key else "pill"
         return f'<a class="{cls}" href="{href}">{safe_html(name)}</a>'
 
-    def sb_item(name, href, key):
-        cls = "sbItem active" if active == key else "sbItem"
-        return f'<a class="{cls}" href="{href}">{safe_html(name)}</a>'
-
-    # ✅ Cycle themes: dark -> light -> reaparr -> dark
-    next_theme = {"dark": "light", "light": "reaparr", "reaparr": "dark"}.get(theme, "dark")
-    next_label = {"dark": "Dark", "light": "Light", "reaparr": "Reaparr"}.get(next_theme, "Dark")
-
-    theme_btn_pill = f"""
+    # Cycle themes: reaparr -> dark -> light -> reaparr
+    next_theme = {"reaparr": "dark", "dark": "light", "light": "reaparr"}.get(theme, "reaparr")
+    next_label = {"dark": "Dark", "light": "Light", "reaparr": "Reaparr"}.get(next_theme, "Reaparr")
+    theme_btn = f"""
       <form method="post" action="/toggle-theme" style="margin:0;">
         <button class="pill" type="submit">Theme: {safe_html(next_label)}</button>
       </form>
     """
 
-    theme_btn_sidebar = f"""
-      <form method="post" action="/toggle-theme">
-        <button class="sbItem" type="submit">Theme: {safe_html(next_label)}</button>
-      </form>
-    """
+    nav = (
+        pill("Dashboard", "/dashboard", "dash")
+        + pill("Jobs", "/jobs", "jobs")
+        + pill("Settings", "/settings", "settings")
+        + pill("Status", "/status", "status")
+        + theme_btn
+    )
 
     has_logo = find_logo_path() is not None
     logo_html = (
@@ -1770,75 +1629,7 @@ def shell(page_title: str, active: str, body: str):
         else '<div class="logoBadge"></div>'
     )
 
-    # Small page title for Radarr layout
-    page_name = {
-        "dash": "Dashboard",
-        "jobs": "Jobs",
-        "settings": "Settings",
-        "status": "Status",
-    }.get(active, "mediareaparr")
-
     toasts = render_toasts()
-
-    if layout == "radarr":
-        sidebar = f"""
-          <div class="sidebar">
-            <div class="sbHd">
-              {logo_html}
-              <div style="min-width:0;">
-                <div style="font-weight:900; letter-spacing:.2px;">mediareaparr</div>
-                <div class="muted" style="font-size:var(--fs-0); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                  Radarr/Sonarr cleanup
-                </div>
-              </div>
-            </div>
-            <div class="sbNav">
-              {sb_item("Dashboard", "/dashboard", "dash")}
-              {sb_item("Jobs", "/jobs", "jobs")}
-              {sb_item("Settings", "/settings", "settings")}
-              {sb_item("Status", "/status", "status")}
-              <div style="height:6px;"></div>
-              {theme_btn_sidebar}
-            </div>
-          </div>
-        """
-
-        return f"""
-<!doctype html>
-<html>
-<head>
-  <title>{safe_html(page_title)}</title>
-  {BASE_HEAD}
-</head>
-<body data-theme="{safe_html(theme)}" style="--ui:{cfg.get('UI_SCALE',1.0)};">
-  <div class="wrap">
-    <div class="layoutRadarr">
-      {sidebar}
-      <div class="mainArea">
-        <div class="pageTop">
-          <div class="ptIn">
-            <h2>{safe_html(page_name)}</h2>
-            <div class="muted" style="font-size:var(--fs-0);">Layout: <b>Radarr</b></div>
-          </div>
-          <div class="ptBd">Same MediaReaparr colour scheme • sidebar navigation</div>
-        </div>
-        {body}
-      </div>
-    </div>
-  </div>
-  {toasts}
-</body>
-</html>
-"""
-
-    # Classic topbar layout
-    nav = (
-        pill("Dashboard", "/dashboard", "dash")
-        + pill("Jobs", "/jobs", "jobs")
-        + pill("Settings", "/settings", "settings")
-        + pill("Status", "/status", "status")
-        + theme_btn_pill
-    )
 
     return f"""
 <!doctype html>
@@ -1863,7 +1654,6 @@ def shell(page_title: str, active: str, body: str):
     <div class="pageBody">
       {body}
     </div>
-  </div>
 
   {toasts}
 </body>
@@ -1890,8 +1680,8 @@ def logo():
 @app.post("/toggle-theme")
 def toggle_theme():
     cfg = load_config()
-    cur = (cfg.get("UI_THEME") or "dark").lower()
-    nxt = {"dark": "light", "light": "reaparr", "reaparr": "dark"}.get(cur, "dark")
+    cur = (cfg.get("UI_THEME") or "reaparr").lower()
+    nxt = {"reaparr": "dark", "dark": "light", "light": "reaparr"}.get(cur, "reaparr")
     cfg["UI_THEME"] = nxt
     save_config(cfg)
     flash(f"Theme set to {cfg['UI_THEME']} ✔", "success")
@@ -2025,8 +1815,6 @@ def settings():
     radarr_enabled = bool(cfg.get("RADARR_ENABLED", True))
     sonarr_enabled = bool(cfg.get("SONARR_ENABLED", False))
 
-    layout_is_radarr = (cfg.get("UI_LAYOUT") == "radarr")
-
     test_label = "Connected" if radarr_ok else "Test Connection"
     test_disabled_attr = "disabled" if radarr_ok else ""
     test_title = "Radarr connection is OK" if radarr_ok else "Test Radarr connection"
@@ -2034,6 +1822,8 @@ def settings():
     sonarr_test_label = "Connected" if sonarr_ok else "Test Connection"
     sonarr_test_disabled_attr = "disabled" if sonarr_ok else ""
     sonarr_test_title = "Sonarr connection is OK" if sonarr_ok else "Test Sonarr connection"
+
+    ui_theme = (cfg.get("UI_THEME") or "reaparr").lower()
 
     body = f"""
       <div class="grid">
@@ -2175,23 +1965,6 @@ def settings():
                   <div class="muted">Global settings</div>
                 </div>
                 <div class="bd">
-
-                  <!-- ✅ NEW: Layout switch -->
-                  <div class="toggleRow">
-                    <div>
-                      <div style="font-weight:800;">Radarr layout</div>
-                      <div class="muted">Sidebar navigation + Radarr-like structure.</div>
-                    </div>
-                    <label class="switch" title="Toggle Radarr layout">
-                      <input id="ui_layout_radarr"
-                             name="UI_LAYOUT_RADARR"
-                             type="checkbox"
-                             {"checked" if layout_is_radarr else ""}
-                             data-initial="{ '1' if layout_is_radarr else '0' }">
-                      <span class="slider"></span>
-                    </label>
-                  </div>
-
                   <div class="form">
                     <div class="field">
                       <label>HTTP Timeout Seconds</label>
@@ -2212,10 +1985,10 @@ def settings():
                     </div>
                     <div class="field">
                       <label>UI Theme</label>
-                      <select name="UI_THEME" data-initial="{safe_html(cfg.get("UI_THEME","dark"))}">
-                        <option value="dark" {"selected" if cfg.get("UI_THEME","dark")=="dark" else ""}>Dark</option>
-                        <option value="light" {"selected" if cfg.get("UI_THEME","dark")=="light" else ""}>Light</option>
-                        <option value="reaparr" {"selected" if cfg.get("UI_THEME","dark")=="reaparr" else ""}>Reaparr</option>
+                      <select name="UI_THEME" data-initial="{safe_html(ui_theme)}">
+                        <option value="reaparr" {"selected" if ui_theme=="reaparr" else ""}>Reaparr</option>
+                        <option value="dark" {"selected" if ui_theme=="dark" else ""}>Dark</option>
+                        <option value="light" {"selected" if ui_theme=="light" else ""}>Light</option>
                       </select>
                     </div>
                   </div>
@@ -2248,10 +2021,10 @@ def save_settings():
     cfg["SONARR_API_KEY"] = request.form.get("SONARR_API_KEY") or ""
 
     cfg["HTTP_TIMEOUT_SECONDS"] = clamp_int(request.form.get("HTTP_TIMEOUT_SECONDS") or 30, 5, 300, 30)
-    cfg["UI_THEME"] = (request.form.get("UI_THEME") or cfg.get("UI_THEME", "dark")).lower()
 
-    # ✅ NEW: save layout toggle
-    cfg["UI_LAYOUT"] = "radarr" if checkbox("UI_LAYOUT_RADARR") else "classic"
+    cfg["UI_THEME"] = (request.form.get("UI_THEME") or cfg.get("UI_THEME", "reaparr")).lower()
+    if cfg["UI_THEME"] not in ("dark", "light", "reaparr"):
+        cfg["UI_THEME"] = "reaparr"
 
     try:
         cfg["UI_SCALE"] = float(request.form.get("UI_SCALE") or cfg.get("UI_SCALE", 1.0))
@@ -2261,12 +2034,6 @@ def save_settings():
         cfg["UI_SCALE"] = 0.75
     if cfg["UI_SCALE"] > 1.5:
         cfg["UI_SCALE"] = 1.5
-
-    if cfg["UI_THEME"] not in ("dark", "light", "reaparr"):
-        cfg["UI_THEME"] = "dark"
-
-    if cfg["UI_LAYOUT"] not in ("classic", "radarr"):
-        cfg["UI_LAYOUT"] = "classic"
 
     if old.get("RADARR_URL") != cfg["RADARR_URL"] or old.get("RADARR_API_KEY") != cfg["RADARR_API_KEY"]:
         cfg["RADARR_OK"] = False
@@ -2321,7 +2088,6 @@ def jobs_toggle_enabled():
 def jobs_page():
     cfg = load_config()
 
-    # Availability is readiness-based (not “has tags”)
     radarr_ready = is_app_ready(cfg, "radarr")
     sonarr_ready = is_app_ready(cfg, "sonarr")
 
@@ -2654,7 +2420,10 @@ def jobs_save():
             raise ValueError("Invalid app selection.")
 
         if not is_app_ready(cfg, app_key):
-            raise ValueError(f"{'Radarr' if app_key=='radarr' else 'Sonarr'} is not connected/enabled. Go to Settings and connect it (or pick the other app).")
+            raise ValueError(
+                f"{'Radarr' if app_key=='radarr' else 'Sonarr'} is not connected/enabled. "
+                "Go to Settings and connect it (or pick the other app)."
+            )
 
         tag_label = (request.form.get("TAG_LABEL") or "").strip()
         if not tag_label:
